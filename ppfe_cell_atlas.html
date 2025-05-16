@@ -1,0 +1,107 @@
+
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PPFE Cell Atlas Übersicht</title>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      margin: 0;
+      padding: 2rem;
+      background-color: #f9fafb;
+      color: #333;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    h1 {
+      font-size: 2rem;
+      margin-bottom: 1rem;
+      text-align: center;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      margin-bottom: 2rem;
+      text-align: center;
+    }
+
+    header img {
+      height: 40px;
+      width: auto;
+    }
+
+    .button-container {
+      width: 100%;
+      max-width: 400px;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    a.explorer-button {
+      display: block;
+      padding: 1rem;
+      color: white;
+      text-align: center;
+      text-decoration: none;
+      font-size: 1rem;
+      border-radius: 6px;
+      transition: background 0.2s;
+    }
+
+    a.epithelial { background-color: #cc79a7; }
+    a.epithelial:hover { background-color: #b36094; }
+
+    a.mesenchymal { background-color: #009e73; }
+    a.mesenchymal:hover { background-color: #007a5b; }
+
+    a.endothelial { background-color: #5654e9; }
+    a.endothelial:hover { background-color: #4442d1; }
+
+    a.lymphoid { background-color: #d55e00; }
+    a.lymphoid:hover { background-color: #b74e00; }
+
+    a.myeloid { background-color: #e69f00; }
+    a.myeloid:hover { background-color: #cc8a00; }
+
+    @media (max-width: 480px) {
+      body {
+        padding: 1rem;
+      }
+
+      h1 {
+        font-size: 1.5rem;
+      }
+
+      a.explorer-button {
+        font-size: 0.95rem;
+        padding: 0.8rem;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <h1>The PPFE Cell Atlas</h1>
+
+  <header>
+    <img src="logo.png" alt="Logo">
+    <h2>Daten-Explorer</h2>
+  </header>
+
+  <div class="button-container">
+    <a class="explorer-button myeloid" href="https://schupp-lab.shinyapps.io/myeloid/" target="_blank">Myeloid</a>
+    <a class="explorer-button mesenchymal" href="https://schupp-lab.shinyapps.io/mesenchymal/" target="_blank">Mesenchym</a>
+    <a class="explorer-button lymphoid" href="https://schupp-lab.shinyapps.io/lymphoid/" target="_blank">Lymphoid</a>
+    <a class="explorer-button epithelial" href="https://schupp-lab.shinyapps.io/epithelial/" target="_blank">Epithel</a>
+    <a class="explorer-button endothelial" href="https://schupp-lab.shinyapps.io/endothelial/" target="_blank">Endothel</a>
+  </div>
+
+</body>
+</html>
