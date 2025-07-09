@@ -205,6 +205,118 @@ p
 dev.off()
 ```
 
+## Quantification of Remodeled/Healthy Parenchyma
+```{r}
+parquant <- readxl::read_xlsx("C:/Users/Jannik/OneDrive/PNE_MHH/AG_Prasse_OneDrive/PPFE/Automated_Image_Analysis/Figure_1_Quantification_of_Remodeled_Parenchyma/Alv_Remodeled_Par_Quantification_PPFE_Germany_France_FINAL_03052025.xlsx")
+
+parquant$Orig.Ident <- parquant$ID
+
+merged_df <- dplyr::left_join(ggData, parquant, by = "Orig.Ident")
+merged_df <- merged_df %>%
+  mutate(Remodeled_Alv_Ratio = ifelse(is.na(Remodeled_Alv_Ratio), 0, Remodeled_Alv_Ratio),
+         Alv_Remodeled_Ratio = ifelse(is.na(Alv_Remodeled_Ratio), 0, Alv_Remodeled_Ratio),
+         )
+
+merged_df$Orig.Ident <- factor(merged_df$Orig.Ident, levels = patient_order)
+
+# Normalize the top bars to be only 1/10 of the total height
+merged_df <- merged_df %>%
+  mutate(Remodeled_Alv_Scaled = Remodeled_Alv_Ratio / max(Remodeled_Alv_Ratio, na.rm = TRUE), 
+         Alv_Remodeled_Scaled = Alv_Remodeled_Ratio / max(Alv_Remodeled_Ratio, na.rm = TRUE))
+
+# Create the plot
+p <- ggplot(merged_df, aes(x = Orig.Ident)) +
+  
+  # Main stacked bar plot (Cell Type Frequencies)
+  geom_bar(aes(y = value, fill = Celltype_ID), stat = "identity", position = "fill", size = 0.5, color = "black") +
+
+  # Add new y-scale for Remodeled data
+  scale_y_continuous(
+    name = "Cell Type Proportion (%)",
+    sec.axis = sec_axis(~ . * max(merged_df$Remodeled_Alv_Ratio, na.rm = TRUE), name = "Remodeled Ratio (%)") # Secondary y-axis
+  ) +
+  
+  # Secondary y-axis: Overlaying bars for Remodeled Alveoli and Alveolar Remodeling
+  geom_col(aes(y = Remodeled_Alv_Scaled, fill = "Remodeled Alveoli"), alpha = 0.5, width = 0.5) +
+  geom_col(aes(y = Alv_Remodeled_Scaled, fill = "Alveolar Remodeling"), alpha = 0.5, width = 0.5) +
+
+  # Labels and themes
+  labs(title = "Stacked Bar Plot with Remodeled Parenchyma",
+       x = "Patient ID",
+       y = "Proportion (%)") + 
+  scale_fill_manual(values = c(lin_pal, 
+                               "Remodeled Alveoli" = "darkviolet", 
+                               "Alveolar Remodeling" = "orange")) +
+  theme_scp() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title.y.right = element_text(color = "darkviolet"), # Highlight secondary axis
+    axis.title.y.left = element_text(color = "black") # Keep main axis
+  ) +
+  facet_wrap(~Disease, scales = "free_x", ncol = 4) +
+  NoLegend() + RotatedAxis()
+```
+
+```{r}
+p1 <- ggplot(merged_df, aes(x = Orig.Ident, y = value*100, fill = Celltype_ID)) +
+  geom_bar(stat = "identity", position = "stack", size = 0.5, color = "black") +
+  labs(x = NULL,
+       y = NULL) + 
+  scale_fill_discrete(lin_pal) +
+  scale_color_discrete(lin_pal) +
+  scale_fill_manual(values = lin_pal) +
+  scale_color_manual(values = lin_pal) +
+  theme_scp() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  facet_wrap(~Disease, scales = "free_x", ncol = 4) + NoLegend()+RotatedAxis()
+
+p1
+
+
+
+plot_data <- merged_df %>%
+  select(Orig.Ident,Disease,Celltype_ID, Alv_Remodeled_Ratio, Remodeled_Alv_Ratio) %>%
+  pivot_longer(cols = c(Alv_Remodeled_Ratio, Remodeled_Alv_Ratio),
+               names_to = "Classification",
+               values_to = "Percentage") %>%
+  filter(Celltype_ID == "Epithelium")
+
+plot_data$Orig.Ident <- factor(plot_data$Orig.Ident, levels = patient_order)
+
+# Create stacked bar plot
+p2 <- ggplot(plot_data, aes(x = Orig.Ident, y = Percentage*100, fill = Classification)) +
+  geom_bar(stat = "identity") +
+  labs(#title = "Stacked Bar Plot of Percent Alv and Percent Remodeled per ID",
+       x = NULL,
+       y = NULL,
+       fill = "Classification") +
+  theme_scp() +
+ # RotatedAxis()+
+  scale_fill_manual(values = c("lightblue", "purple"))+
+  scale_color_manual(values = c("lightblue", "purple"))+
+  theme_scp() +
+   theme(
+    axis.text.x = element_blank(), 
+    axis.text.x.bottom = element_blank(),  # Remove x-axis labels
+    axis.title.x = element_blank(),  # Remove x-axis title
+    axis.ticks.x = element_blank()#,  # Remove x-axis ticks
+    #strip.text = element_blank() 
+    )+ # Remove facet titles
+  facet_wrap(~Disease, scales = "free_x", ncol = 4) + NoLegend()+RotatedAxis()+
+  scale_y_continuous(breaks = c(0,100))
+p2
+```
+```{r}
+# Plot the Final Plots together with Stacked Bar Plots
+pdf((file = file.path(folder,"Figure_1Stackedbarplots_lineage.pdf")), width = 17, height = 6.5)
+p1
+dev.off()
+
+pdf((file = file.path(folder,"Figure_1Stackedbarplots_RemodAlv.pdf")), width = 17, height = 1.0)
+p2
+dev.off()
+```
+
 ## Frequency Plots
 ```{r}
 # Convert disease.ident and Celltype to factors
@@ -894,6 +1006,46 @@ dev.off()
 ```
 
 
+#==========================
+
+## Figure S7 - Correlation Plot
+```{r}
+library(ggplot2)
+library(dplyr)
+library(ggpubr)
+lineages <- merged_df$Celltype_ID %>% levels()
+
+# Define custom colors and shapes
+disease_colors <- c("Germany_PPFE" = "darkred", "France_PPFE" = "pink")
+disease_shapes <- c("Germany_PPFE" = 16, "France_PPFE" = 17)  # e.g., filled circle and triangle
+
+# Generate the plots
+plot_list <- lapply(lineages, function(x){
+  cor_data <- merged_df %>% 
+    filter(Celltype_ID == x) %>%
+    filter(Disease %in% c("Germany_PPFE", "France_PPFE")) %>%
+    mutate(Frequency = value * 100,
+           Remodeled_Parenchyma = Remodeled_Alv_Ratio * 100)
+
+  ggplot(cor_data, aes(x = Frequency, y = Remodeled_Parenchyma)) +
+    geom_point(aes(color = Disease, shape = Disease), size = 2) +  # color & shape for points only
+    geom_smooth(method = "lm", se = TRUE, color = "black") +       # single correlation line
+    stat_cor(method = "pearson") +
+    scale_color_manual(values = disease_colors) +
+    scale_shape_manual(values = disease_shapes) +
+    labs(
+      x = paste0("Frequency of ", x, " (%)"),
+      y = "Remodeled Parenchyma (%)",
+      title = paste0("Correlation: ", x)
+    ) +
+    theme_scp()
+})
+
+# Arrange and save
+combined_plot <- ggarrange(plotlist = plot_list, ncol = 2, nrow = ceiling(length(plot_list)/2), common.legend = T)
+ggsave("Immune_Correlation_Multipanel.pdf", combined_plot, width = 6, height = 8)
+
+```
 
 # Save Final Dataset
 ```{r}
