@@ -558,7 +558,7 @@ p
 #==================
 # Statistics
 
-## Wilcox Rank Sum Test & Tukey-Test posthoc
+## Wilcox Rank Sum Test & Bonferroni Adjustment
 ```{r}
 library(rstatix)
 library(writexl)
@@ -634,9 +634,9 @@ median_frequencies_Germany_CTRL <- ggData %>%
 addWorksheet(wb, "Germany_CTRL")
 writeData(wb, "Germany_CTRL", median_frequencies_Germany_CTRL)
 
-# Belgian_IPF
+# IPF_Belgium
 median_frequencies_Dutch_IPF <- ggData %>%
-  filter(Disease == "Belgian_IPF") %>%
+  filter(Disease == "IPF_Belgium") %>%
   group_by(Celltype_ID) %>%
   summarize(
     median_freq = mean(value),
@@ -644,15 +644,15 @@ median_frequencies_Dutch_IPF <- ggData %>%
   ) %>%
   arrange(-median_freq)
 
-addWorksheet(wb, "Belgian_IPF")
-writeData(wb, "Belgian_IPF", median_frequencies_Dutch_IPF)
+addWorksheet(wb, "IPF_Belgium")
+writeData(wb, "IPF_Belgium", median_frequencies_Dutch_IPF)
 
 # Save the workbook
 saveWorkbook(wb, "PPFE_IPF_Celltype_Frequencies_ALL_b1b2_RPCA.xlsx", overwrite = TRUE)
 ```
 
 #======================
-# Build Heatmap
+# UnityHeatmap
 
 ### Marker Gene Selection
 ```{r}
