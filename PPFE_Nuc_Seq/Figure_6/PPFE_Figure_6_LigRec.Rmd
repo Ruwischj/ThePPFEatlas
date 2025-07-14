@@ -1,0 +1,310 @@
+---
+title: "MultiNichenet_Endothelium"
+author: "Jannik Ruwisch"
+date: "2025-01-19"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T,
+                      fig.width = 14,
+                      fig.height = 7,
+                      dev = "png",
+                      cache = F)
+```
+
+# Load libraries
+```{r}
+library(multinichenetr)
+library(SingleCellExperiment)
+library(dplyr)
+library(ggplot2)
+library(nichenetr)
+library(data.table)
+library(magrittr)
+set.seed(123)
+```
+
+# Setup Multinichenet
+```{r}
+organism = "human"
+options(timeout = 120)
+
+if(organism == "human"){
+  
+  lr_network_all = 
+    readRDS(url(
+      "https://zenodo.org/record/10229222/files/lr_network_human_allInfo_30112033.rds"
+      )) %>% 
+    mutate(
+      ligand = convert_alias_to_symbols(ligand, organism = organism), 
+      receptor = convert_alias_to_symbols(receptor, organism = organism))
+  
+  lr_network_all = lr_network_all  %>% 
+    mutate(ligand = make.names(ligand), receptor = make.names(receptor)) 
+  
+  lr_network = lr_network_all %>% 
+    distinct(ligand, receptor)
+  
+  ligand_target_matrix = readRDS(url(
+    "https://zenodo.org/record/7074291/files/ligand_target_matrix_nsga2r_final.rds"
+    ))
+  
+  colnames(ligand_target_matrix) = colnames(ligand_target_matrix) %>% 
+    convert_alias_to_symbols(organism = organism) %>% make.names()
+  rownames(ligand_target_matrix) = rownames(ligand_target_matrix) %>% 
+    convert_alias_to_symbols(organism = organism) %>% make.names()
+  
+  lr_network = lr_network %>% filter(ligand %in% colnames(ligand_target_matrix))
+  ligand_target_matrix = ligand_target_matrix[, lr_network$ligand %>% unique()]
+  
+} else if(organism == "mouse"){
+  
+  lr_network_all = readRDS(url(
+    "https://zenodo.org/record/10229222/files/lr_network_mouse_allInfo_30112033.rds"
+    )) %>% 
+    mutate(
+      ligand = convert_alias_to_symbols(ligand, organism = organism), 
+      receptor = convert_alias_to_symbols(receptor, organism = organism))
+  
+  lr_network_all = lr_network_all  %>% 
+    mutate(ligand = make.names(ligand), receptor = make.names(receptor)) 
+  lr_network = lr_network_all %>% 
+    distinct(ligand, receptor)
+  
+  ligand_target_matrix = readRDS(url(
+    "https://zenodo.org/record/7074291/files/ligand_target_matrix_nsga2r_final_mouse.rds"
+    ))
+  
+  colnames(ligand_target_matrix) = colnames(ligand_target_matrix) %>% 
+    convert_alias_to_symbols(organism = organism) %>% make.names()
+  rownames(ligand_target_matrix) = rownames(ligand_target_matrix) %>% 
+    convert_alias_to_symbols(organism = organism) %>% make.names()
+  
+  lr_network = lr_network %>% filter(ligand %in% colnames(ligand_target_matrix))
+  ligand_target_matrix = ligand_target_matrix[, lr_network$ligand %>% unique()]
+  
+}
+```
+
+# Load multinichenet object
+```{r}
+multinichenet_output <- readRDS("./PPFE_CTRL_subsamples_Celltype_multinichenet_output.rds")
+```
+
+# Choose Folder 
+```{r}
+output_dir <-  choose.dir()
+```
+
+#===============
+
+### CircoPlot from Endothelium to Mesenchyme
+```{r}
+prioritized_tbl_oi_all = get_top_n_lr_pairs(
+  multinichenet_output$prioritization_tables, 
+  top_n = 3000, 
+  rank_per_group = FALSE
+  )
+
+prioritized_tbl_oi = 
+  multinichenet_output$prioritization_tables$group_prioritization_tbl %>%
+  filter(id %in% prioritized_tbl_oi_all$id) %>%
+  distinct(id, sender, receiver, ligand, receptor, group) %>% 
+  left_join(prioritized_tbl_oi_all)
+prioritized_tbl_oi$prioritization_score[is.na(prioritized_tbl_oi$prioritization_score)] = 0
+
+prioritized_tbl_oi
+
+# Filter for celltypes of interst 
+prioritized_tbl_oi <- prioritized_tbl_oi %>%
+  filter(receiver == "Adventitial_Fb" |
+           receiver == "Adventitial_like_Fb" |
+           receiver == "CTHRC1_MyoFb" | 
+           receiver == "Subpleural_Fb" | 
+           receiver == "Alveolar_Fb" | 
+           receiver == "Airway_Fb") %>%
+  filter(sender == "EC_lymphatic" | sender == "EC_systemic_venous" )
+
+# Set the colors
+senders_receivers = union(prioritized_tbl_oi$sender %>% unique(), prioritized_tbl_oi$receiver %>% unique()) %>% sort()
+senders_receivers
+
+colors_sender =  SCP::palette_scp(n = 6, palcolor = c(  "#6A3D9A",  "#CAB2D6",  "#1F78B4", "#A6CEE3", "#E31A1C","#00A087", "#E64B35",  "#FB9A99"), x = senders_receivers)
+colors_receiver =  SCP::palette_scp(n = 6, palcolor = c(  "#6A3D9A",  "#CAB2D6",  "#1F78B4", "#A6CEE3", "#E31A1C","#00A087", "#E64B35",  "#FB9A99"), x = senders_receivers)
+
+circos_list = make_circos_group_comparison(prioritized_tbl_oi, colors_sender, colors_receiver)
+
+# Export Output 
+pdf(file.path(paste0(output_dir,"/Chord_PPFE_ECLymphatics_to_Adventitial.pdf")), width = 8, height = 8)
+cowplot::plot_grid(circos_list$PPFE)
+dev.off()
+
+pdf(file.path(paste0(output_dir,"/Chord_CTRL_ECLymphatics_to_Adventitial.pdf")), width = 8, height = 8)
+cowplot::plot_grid(circos_list$CTRL)
+dev.off()
+
+pdf(file.path(paste0(output_dir,"/Chord_PPFE_ECLymphatics_to_Adventitial_legend.pdf")), width = 8, height = 8)
+circos_list$legend
+dev.off() 
+```
+
+
+### Downstream from Cellchat Interaction Weight
+```{r, fig.height=48, fig.width=24}
+# Group1
+group_oi = "PPFE"
+
+prioritized_tbl_oi_M_50 = get_top_n_lr_pairs(
+  multinichenet_output$prioritization_tables, 
+  10000, 
+  groups_oi = group_oi, 
+  senders_oi = c("EC_lymphatic", "EC_systemic_venous"),
+  receivers_oi = c("CTHRC1_MyoFb", "Adventitial_Fb", "Adventitial_like_Fb", "Airway_Fb", "Subpleural_Fb", "Alveolar_Fb")
+  ) 
+
+  
+plot_oi = make_sample_lr_prod_activity_plots_Omnipath(
+  multinichenet_output$prioritization_tables, 
+  prioritized_tbl_oi_M_50 %>% inner_join(lr_network_all)
+  )
+plot_oi
+
+# Export as PNG 
+pdf(file.path(paste0(output_dir,"/BubblePlot_MultiNichenet_FINAL.pdf")), width = 24, height = 14)
+plot_oi
+dev.off()
+```
+
+```{r}
+plot_oi[[2]]$data -> df 
+top_10_ligands <- df %>%
+  ungroup %>%
+  filter(sender == "EC_systemic_venous") %>%
+  arrange(desc(activity_scaled)) %>%  
+  filter(direction_regulation == "up") %>%# Sort by scaled_activity in descending order
+  top_n(50, wt = activity_scaled) %>%
+  pull(lr_interaction) %>%
+  unique()
+  
+
+# View the result
+print(top_10_ligands)
+```
+
+
+### Target Gene Regulation
+```{r}
+sample_id = "orig.ident_final"
+group_id = "disease.ident"
+celltype_id = "Celltype_ID_final_niche" # ordered for heatmap
+covariates = NA 
+batches = NA
+contrasts_oi = c("'PPFE-CTRL','CTRL-PPFE'")
+contrast_tbl = tibble(contrast = c("PPFE-CTRL","CTRL-PPFE"), group = c("PPFE","CTRL"))
+group_oi = "PPFE"
+receiver_oi = c("Adventitial_Fb", "Adventitial_like_Fb")
+ligands_oi = c("PDGFC", "JAM2", "BMP2") # Define the major ligands of interest based on the scaled activity 
+
+prioritized_tbl_ligands_oi = get_top_n_lr_pairs(
+  multinichenet_output$prioritization_tables, 
+  500, 
+  groups_oi = group_oi, 
+  receivers_oi = receiver_oi
+  ) %>% filter(ligand %in% ligands_oi) 
+prioritized_tbl_ligands_oi
+
+combined_plot = make_ligand_activity_target_plot(
+  group_oi, 
+  receiver_oi, 
+  prioritized_tbl_ligands_oi, 
+  multinichenet_output$prioritization_tables, 
+  multinichenet_output$ligand_activities_targets_DEgenes, 
+  contrast_tbl, 
+  multinichenet_output$grouping_tbl, 
+  multinichenet_output$celltype_info, 
+  ligand_target_matrix, 
+  plot_legend = FALSE)
+combined_plot
+
+# Export as PDF 
+pdf(file.path(paste0(output_dir,"/Targets_MultiNichenet_FINAL.pdf")), width = 14, height = 14)
+combined_plot
+dev.off()
+```
+
+### Target Gene Enrichment Analysis
+```{r, fig.width=30, fig.height=10}
+# Get the top targets for Downstream-Enrichment Analysis
+combined_plot$combined_plot[[3]]$data %>%
+  filter(direction_regulation == "up" & score > 0) %>%
+  pull("target") %>%
+  unique() %>%
+  as.character() %>% unique() -> TopRegulatedGenes
+
+
+# EnrichR Plot 
+library(enrichplot)
+library(enrichR)
+
+# Enrichment analysis
+listEnrichrSites()
+setEnrichrSite("Enrichr")
+websiteLive <- TRUE
+dbs <- c("Reactome_Pathways_2024", "KEGG_2021_Human", "GO_Biological_Process_2021") # selecting the libraies of interest
+# IPF vs CNT DEGs
+enriched <- enrichr(TopRegulatedGenes, dbs) # UP - 0.5 FC FILT
+
+exp<-enriched$Reactome_Pathways_2024
+exp$Ref<-c("Reactome_Pathways_2024")
+exp_temp<-enriched$GO_Biological_Process_2021
+exp_temp$Ref<-c("GO_Biological_Process_2021")
+exp<-rbind(exp, exp_temp)
+exp_temp<-enriched$KEGG_2021_Human
+exp_temp$Ref<-c("KEGG_2021_Human")
+exp<-rbind(exp, exp_temp)
+exp$cluster<-c("UP")
+
+exp_enrich<-subset(exp, exp$Adjusted.P.value<0.05& Ref == "GO_Biological_Process_2021")
+# Count how many gene elements per term
+exp_enrich$temp<-gsub(";", "", exp_enrich$Genes)
+exp_enrich$num<-(nchar(exp_enrich$Genes)-nchar(exp_enrich$temp)) + 1
+exp_enrich$temp<-NULL
+writexl::write_xlsx(exp_enrich,paste0(output_dir,"/PPFE_AdventitialFb_TopTargets_EC_Lymphatic_ALL.xlsx"))
+
+temp<-subset(exp_enrich, Combined.Score>50)
+temp$Adjusted.P.value <- -log10(temp$Adjusted.P.value)
+
+temp %>% 
+ arrange(desc(Adjusted.P.value)) %>%
+top_n(10, wt = Adjusted.P.value) -> temp
+
+
+# Remove "GO: XXXXXXX" pattern and add "GO_BP: " before each term
+temp$Term <- paste0("",gsub("\\(GO:\\d+\\)", "", temp$Term))
+
+neworder<-data.frame(Term=temp$Term, score=temp$Adjusted.P.value)
+neworder<-aggregate(. ~Term, neworder, sum)
+neworder<-neworder[order(neworder$score, decreasing = F),]
+temp$x<-factor(temp$Term, levels =neworder$Term)
+temp<-subset(temp, is.na(temp$x)==F)
+temp<-droplevels(temp)
+
+
+
+p <- ggplot(temp, aes(x = Adjusted.P.value, y = reorder(Term, abs(Adjusted.P.value)), fill=Ref)) +
+  geom_col(position = "stack")+
+  geom_text(aes(label = num), 
+            hjust = -0.1,     # adjust spacing to the right of the bar
+            size = 3.5) +     # adjust font size
+  labs(x = "-log10(Adjusted p-value)", y = "Pathways", title = "Top 10 Pathways from Two Datasets") +
+  theme(legend.position = "top") +
+  scale_fill_manual(values = c("#BF616A")) +
+  theme_scp() +
+  theme(axis.text.y = element_text(size = 16)) +
+  coord_cartesian(xlim = c(0, max(combined_df$Adjusted.P.value) * 1.2))  # ensure space for labels
+
+pdf(file.path(paste0(output_dir,"/GOBP_enrichment_EC_Lymphatic_Target_genes_ALLLigannds.pdf")), width = 12, height = 7)
+p
+dev.off()
+```

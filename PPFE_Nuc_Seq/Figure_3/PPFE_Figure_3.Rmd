@@ -1,0 +1,188 @@
+---
+title: "PPFE_Spatial_Frequencies"
+author: "Jannik Ruwisch"
+date: "2025-02-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(dplyr)
+library(readxl)
+library(ggplot2)
+library(tidyr)
+library(Seurat)
+library(forcats)
+```
+
+# Read in Qupath Classifier output
+
+## ISH
+```{r}
+df_mes <- read_xlsx("./PPFE_QuPath_COl1A1_SFRP2_ISH_export.xlsx") # Merged Dataframe derived from QuPath Exports
+df_mes$Classification %>% unique()
+df_mes <- df_mes %>%
+  filter(Classification %in% c("FF_Zone",
+                               "Fibroelastosis_Zone",
+                               "Fibrous_Pleura_Zone",
+                               "Immune_Cell_Zone" )
+         )
+
+df_mes
+```
+
+## IF
+```{r}
+df_mes <- read_xlsx("./PPFE_QuPath_CD4_CD8_KRT17_IF_export.xlsx") # Merged Dataframe derived from QuPath Exports
+df <- df %>%
+  mutate(
+    CD4_per_area = CD4 / TotalArea,
+    CD8_per_area = CD8 / TotalArea,
+    KRT17_per_area = KRT17 / TotalArea
+  )
+```
+
+## Stacked barplots of Surface Fractions
+```{r}
+# Summarize area by Sample ID and Classification
+summary_df <- df_mes %>%
+  group_by(ID, Classification) %>%
+  summarise(TotalArea = sum(TotalArea), .groups = "drop")
+
+# Stacked bar plot of total area
+p1 <- ggplot(summary_df, aes(x = ID, y = TotalArea, fill = Classification)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Total Area by Sample ID and Classification",
+       x = "Sample ID",
+       y = "Total Area (µm²)") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set2")
+
+# Convert to percentage per sample
+percent_df <- summary_df %>%
+  group_by(ID) %>%
+  mutate(Percentage = (TotalArea / sum(TotalArea)) * 100) %>%
+  ungroup()
+
+# Order IDs by highest percentage of "Immune Cells"
+immune_order <- percent_df %>%
+  filter(Classification == "Fibrous_Pleura_Zone") %>%
+  arrange(desc(Percentage)) %>%
+  pull(ID)
+
+# Convert ID to a factor with custom order
+percent_df$ID <- factor(percent_df$ID, levels = immune_order)
+percent_df$Classification <- factor(percent_df$Classification, 
+                                 levels = c("Fibrous_Pleura_Zone",
+                                                                    "Fibroelastosis_Zone",
+                                                                    "Immune_Cell_Zone",
+                                                                    "FF_Zone"))
+
+# Stacked bar plot with percentages
+p2 <- ggplot(percent_df, aes(x = ID, y = Percentage, fill = Classification)) +
+  geom_bar(stat = "identity") +
+  labs(title = "",
+       x = "",
+       y = "") +
+  theme_minimal() +
+  scale_fill_manual(values = c( "#377EB8" , "#4DAF4A",  "#E41A1C" ,  "#984EA3" ))
+  NoLegend()
+
+#Export as PDF
+pdf(file = "Area_Densities_SDFRP2_COL1A1_zone.pdf", width = 7, height = 6)
+p2+RotatedAxis()+theme_scp()
+dev.off()
+```
+
+## Density Boxplots COL1A1 and SFRP2 ISH
+```{r}
+# Calculate cell density (counts per unit area)
+df_mes <- df_mes %>%
+  mutate(SFRP2_per_area = SFRP2 / TotalArea,
+         COL1A1_per_area = COL1A1 / TotalArea,
+         SFRP2_COL1A1_per_area = SFRP2_COL1A1 / TotalArea)
+
+# Convert to long format for ggplot
+long_df <- df_mes %>%
+  pivot_longer(cols = c(SFRP2_per_area, COL1A1_per_area, SFRP2_COL1A1_per_area), 
+               names_to = "Cell_Type", values_to = "Density")
+
+long_df$Classification <- factor(long_df$Classification, levels = c("Fibrous_Pleura_Zone",
+                                                                    "Fibroelastosis_Zone",
+                                                                    "Immune_Cell_Zone",
+                                                                    "FF_Zone"))
+# All pairwise comparisons between Classifications
+comparisons <- combn(levels(long_df$Classification), 2, simplify = F)
+
+# Plot
+p <- ggplot(long_df, aes(x = Classification, y = Density)) +
+  geom_boxplot(mapping = aes(x = Classification, y = Density, fill = Cell_Type),data = long_df, outlier.shape = NA, alpha = 0.7) +
+  labs(
+    title = "Cell Type Density by Classification (Counts per Unit Area)",
+    x = "Classification",
+    y = "Cell Density (Cells per µm²)"
+  ) +
+  theme_scp() +
+  RotatedAxis() +
+  scale_fill_manual(values =  c( "#E31A1C",  "#CAB2D6", "#6A3D9A")) +
+  #scale_color_manual(values = c( "#E31A1C", "#CAB2D6",  "#6A3D9A")) +
+  stat_compare_means(
+    comparisons = comparisons,
+    method = "wilcox.test",
+    hide.ns = T,
+    label = "p.signif", 
+    ref.group = "Immune_Cell_Zone",
+  ) +
+  facet_wrap(~Cell_Type, scales = "free_y")
+
+p
+pdf(file = "Density_Counts_SFRP2_COL1A1_COPOSITIVE_abundance_per_zone.pdf", width = 10, height = 6)
+p
+dev.off()
+```
+
+##  Density Boxplots CD4 CD8 and KRT17 IF
+```{r}
+# Prepare data
+long_df_immune <- df %>%
+  pivot_longer(cols = c(CD4_per_area, CD8_per_area, KRT17_per_area), 
+               names_to = "Cell_Type", values_to = "Density")
+
+long_df$Classification <- factor(long_df$Classification, levels = c(
+  "Fibrous_Pleura_Zone",
+  "Fibroelastosis_Zone",
+  "Immune_Cell_Zone",
+  "FF_Zone",
+  "Aberrant_Basaloid_Zone"
+))
+
+# All pairwise comparisons between Classifications
+comparisons <- combn(levels(long_df$Classification), 2, simplify = F)
+long_df$Cell_Type %>% unique()
+# Plot
+p <- ggplot(long_df, aes(x = Classification, y = Density)) +
+  geom_boxplot(mapping = aes(x = Classification, y = Density, fill = Cell_Type),data = long_df, outlier.shape = NA, alpha = 0.7) +
+  labs(
+    title = "Cell Type Density by Classification (Counts per Unit Area)",
+    x = "Classification",
+    y = "Cell Density (Cells per µm²)"
+  ) +
+  theme_scp() +
+  RotatedAxis() +
+  scale_fill_manual(values =  c("#D9D7C9" ,"#D8C965","#ff084a")) +
+  stat_compare_means(
+    comparisons = comparisons,
+    method = "wilcox.test",
+    hide.ns = T,
+    label = "p.signif") +
+    facet_wrap(~Cell_Type, scales = "free_y")
+
+# Export as PDF 
+pdf(file = "Density_Counts_CD4_CD8_KRT17_abundance_per_zone.pdf", width = 10, height = 6)
+p
+dev.off()
+```

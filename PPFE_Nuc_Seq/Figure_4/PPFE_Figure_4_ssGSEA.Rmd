@@ -1,0 +1,297 @@
+---
+title: "ESCAPE_Enrichment_PPFE_Epi"
+author: "Jannik Ruwisch"
+date: "2024-12-18"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T,
+                      fig.width = 14,
+                      fig.height = 8,
+                      #dpi = 1200,
+                      dev = "png",
+                      cache = F)
+```
+
+
+```{r}
+library(escape)
+library(matrixStats)
+library(Seurat)
+library(dplyr)
+library(tidyseurat)
+library(readxl)
+library(writexl)
+library(SeuratWrappers)
+library(dplyr)
+library(ggplot2)
+library(RColorBrewer)
+library(SCP)
+library(BiocParallel)
+```
+
+# Choose Folder
+```{r}
+folder <- choose.dir()
+```
+
+
+```{r}
+seurat.obj <- readRDS("/mnt/dzl_bioinf/ruwischj/scRNA_Seq/PPFE_Nuclei_Seq/PPFE_IPF_EPI/PPFE_b1b2_IPF_int_RPCA_25112024.rds")
+seurat.obj <- subset(seurat.obj, disease.ident != "IPF")
+```
+
+
+# Define  functions
+```{r}
+# Overwrite the .cntEval function
+myCntEval  <- function (obj, assay = "RNA", type = "counts") 
+{
+  if (inherits(x = obj, what = "Seurat")) {
+    cnts <- GetAssayData(object = obj, assay = assay, slot = type)
+  }
+  else if (inherits(x = obj, what = "SingleCellExperiment")) {
+    pos <- ifelse(assay == "RNA", "counts", assay)
+    if (assay == "RNA") {
+      cnts <- assay(obj, pos)
+    }
+    else {
+      cnts <- assay(altExp(obj), pos)
+    }
+  }
+  else {
+    cnts <- obj
+  }
+  cnts <- cnts[rowSums2(cnts) != 0, ]
+  return(cnts)
+}
+assignInNamespace(".cntEval", myCntEval, ns="escape")
+
+# Overwrite .pull.Enrich function
+mypullenrich <- function (sc, enrichment.name) 
+{
+  if (inherits(sc, "Seurat")) {
+    values <- t(GetAssayData(object = sc, assay = enrichment.name, slot = "data"))
+  }
+  else if (inherits(sc, "SingleCellExperiment")) {
+    if (length(assays(altExp(sc))) == 1) {
+      values <- t(assay(altExps(sc)[[enrichment.name]]))
+    }
+  }
+}
+assignInNamespace(".pull.Enrich", mypullenrich, ns="escape")
+
+# Overwrite .colorizer function
+Colorizer2 <- function (palette = "inferno", n = NULL, palcolor = NULL) 
+{ colors <- SCP::palette_scp(n = n, palette = palette, palcolor = palcolor)
+  #colors <- hcl.colors(n = n, palette = palette, fixup = TRUE)
+  return(colors)
+}
+assignInNamespace(".colorizer", Colorizer2, ns="escape")
+
+# Overwrite Heatmap Plotting function
+heat_custom <- function (input.data, assay = NULL, group.by = NULL, gene.set.use = "all", 
+  cluster.rows = FALSE, cluster.columns = FALSE, scale = FALSE, 
+  facet.by = NULL, palette = "inferno"){
+  options(dplyr.summarise.inform = FALSE)
+  if (is.null(group.by)) {
+    group.by <- "ident"
+  }
+  enriched <- .prepData(input.data, assay, gene.set.use, group.by, 
+    NULL, facet.by)
+  if (length(gene.set.use) == 1 && gene.set.use == "all") {
+    gene.set <- colnames(enriched)[colnames(enriched) %!in% 
+      c(group.by, facet.by)]
+  }
+  else {
+    gene.set <- gene.set.use
+  }
+  if (!is.null(facet.by)) {
+    enriched.summary <- enriched %>% group_by(.data[[group.by]], 
+      .data[[facet.by]]) %>% summarise(across(which(colnames(enriched) %in% 
+      gene.set), mean)) %>% as.data.frame()
+  }
+  else {
+    enriched.summary <- enriched %>% group_by(.data[[group.by]]) %>% 
+      summarise(across(which(colnames(enriched) %in% gene.set), 
+        mean)) %>% as.data.frame()
+  }
+  if (scale) {
+    enriched.summary[, gene.set] <- apply(enriched.summary[, 
+      gene.set], 2, scale)
+  }
+  reformated.enriched <- suppressMessages(melt(enriched.summary))
+  if (cluster.rows) {
+    row.order <- gene.set[hclust(dist(t(enriched.summary[, 
+      gene.set]), method = "euclidean"), method = "ward.D2")$order]
+    reformated.enriched[, "variable"] <- factor(reformated.enriched[, 
+      "variable"], levels = row.order)
+  }
+  if (cluster.columns) {
+    column.order <- unique(enriched.summary[, group.by][hclust(dist(enriched.summary[, 
+      gene.set], method = "euclidean"), method = "ward.D2")$order])
+    reformated.enriched[, group.by] <- factor(reformated.enriched[, 
+      group.by], levels = as.vector(column.order))
+  }
+  plot <- ggplot(reformated.enriched, mapping = aes(x = reformated.enriched[, 
+    group.by], y = variable, fill = value)) + geom_tile(color = "black", 
+    linewidth = 0.5) + scale_y_discrete(expand = c(0, 0)) + 
+    scale_x_discrete(expand = c(0, 0)) + labs(fill = "Enrichment Score") + 
+    guides(fill = guide_colorbar(title.position = "top", 
+      title.hjust = 0.5)) + coord_equal() + scale_fill_gradientn(colors = .colorizer(palette, 
+    11)) + theme_classic() + theme(axis.title = element_blank(), 
+    axis.ticks = element_blank(), legend.direction = "horizontal", 
+    legend.position = "bottom")
+  if (!is.null(facet.by)) {
+    plot <- plot + facet_grid(as.formula(paste(". ~", facet.by)), scales = "free_x")
+  }
+  return(plot)
+}
+assignInNamespace("heatmapEnrichment", heat_custom, ns="escape")
+
+# add Add Assay Function
+add_escape_assay <- function (sc, enrichment, enrichment.name) 
+  {
+  if (inherits(sc, "Seurat")) {
+    new.assay <- suppressWarnings(CreateAssayObject(data = as.matrix(t(enrichment))))
+    sc[[enrichment.name]] <- new.assay
+  }
+  else if (inherits(sc, "SingleCellExperiment")) {
+    altExp(sc, enrichment.name) <- SummarizedExperiment(assays = t(enrichment))
+    names(assays(altExp(sc, enrichment.name))) <- enrichment.name
+  }
+  return(sc)
+}
+```
+
+#==============
+
+# Enrichment
+
+## Gene Ontology Biological Pathway 
+```{r}
+# Export Esacpe build-in GO-BP Reference Database
+CanonicalPathwaysC5_GOBP <- getGeneSets(library = "C5",
+                                   subcategory = "BP")
+# Get Counts from srt obj.
+DefaultAssay(seurat.obj) <- "RNA"
+cnts <- GetAssayData(seurat.obj, assay = "RNA", slot = "counts")
+
+# Get Enrichment-Matrix
+enrichment.scores_genesets <- escape.matrix(cnts,
+                              method = "ssGSEA", 
+                              gene.sets = CanonicalPathwaysC5_GOBP,
+                              groups = 5000, 
+                              min.size = 5, 
+                              normalize = F,
+                              BPPARAM = BiocParallel::SnowParam(workers = 15))
+# Save Enrichment per cell
+saveRDS(enrichment.scores_genesets, "PPFE_EP_GO_BP_Enrichment.rds")
+
+# Add to srt obj
+seurat.obj <- add_escape_assay(seurat.obj, enrichment.scores_genesets, "escapeSet.ssGSEA")
+
+# Normalize for Featureplot
+seurat.obj <- performNormalization(seurat.obj, 
+                                      assay = "escapeSet.ssGSEA", 
+                                      gene.sets = CanonicalPathwaysC5_GOBP, 
+                                      scale.factor = seurat.obj$nFeature_RNA)
+# Save Dataset
+saveRDS(seurat.obj, "PPFE_Epi_ssGSEA_norm.rds")
+```
+
+#==============
+
+# ssGSEA Feature Plots
+```{r}
+p <- SCP::FeatureDimPlot(scRep_example, 
+               features = c(
+                            "GOBP-TRANSFORMING-GROWTH-FACTOR-BETA1-PRODUCTION"),
+               split.by = "disease.ident",
+               assay = "escapeSet.ssGSEA", 
+               keep_scale = "feature",
+               reduction = "ReUMAPone", 
+               title = "",
+               add_density = F, 
+               ncol = 2,
+               compare_features = F, upper_quantile = 0.9, 
+               lower_quantile = 0.2, 
+               palette = "viridis",
+               bg_color = "#222222",
+               show_stat = F,
+               theme_use = "theme_bw")& DarkTheme() +
+                theme(axis.line = element_line(colour = "black"),
+                      plot.title = ggplot2::element_text(size = 20, face = "bold"),
+                      panel.grid.major = element_blank(),
+                      panel.grid.minor = element_blank(),
+                      panel.border = element_blank(),
+                      panel.background = element_blank(), 
+                      axis.text = element_blank(),  
+                      axis.ticks = element_blank(),
+                      strip.text = element_text(size = 16, face = "bold", colour = "white")
+                      )
+
+p
+pdf(file.path(folder, "ssGSEA_TGFB_Epi.pdf"), height = 7, width = 14)
+p
+dev.off()
+
+p <- SCP::FeatureDimPlot(scRep_example, 
+               features = c("GOBP-REGULATION-OF-INFLAMMATORY-RESPONSE-TO-WOUNDING"),
+               split.by = "disease.ident",
+               assay = "escapeSet.ssGSEA", 
+               keep_scale = "feature",
+               reduction = "ReUMAPone", 
+               title = "",
+               add_density = F, 
+               ncol = 2,
+               compare_features = F, upper_quantile = 0.9, 
+               lower_quantile = 0.1, 
+               palette = "viridis",
+               bg_color = "#222222",
+               show_stat = F,
+               theme_use = "theme_bw")& DarkTheme() +
+                theme(axis.line = element_line(colour = "black"),
+                      plot.title = ggplot2::element_text(size = 20, face = "bold"),
+                      panel.grid.major = element_blank(),
+                      panel.grid.minor = element_blank(),
+                      panel.border = element_blank(),
+                      panel.background = element_blank(), 
+                      axis.text = element_blank(),   # Remove axis text
+                      axis.ticks = element_blank(),
+                      strip.text = element_text(size = 16, face = "bold", colour = "white"))
+
+pdf(file.path(folder, "ssGSEA_Inflamm_Epi.pdf"), height = 7, width = 14)
+p
+dev.off()
+
+p <- SCP::FeatureDimPlot(scRep_example, 
+               features = c("GOBP-REPLICATIVE-SENESCENCE"), 
+               split.by = "disease.ident",
+               assay = "escapeSet.ssGSEA", 
+               keep_scale = "feature",
+               reduction = "ReUMAPone", 
+              title = "",
+               add_density = F, 
+               ncol = 2,
+               compare_features = F, upper_quantile = 0.99, 
+               lower_quantile = 0.3, 
+               palette = "viridis",
+               bg_color = "#222222",
+               show_stat = F,
+               theme_use = "theme_bw")& DarkTheme() +
+                theme(axis.line = element_line(colour = "black"),
+                      plot.title = ggplot2::element_text(size = 20, face = "bold"),
+                      panel.grid.major = element_blank(),
+                      panel.grid.minor = element_blank(),
+                      panel.border = element_blank(),
+                      panel.background = element_blank(), 
+                      axis.text = element_blank(),   # Remove axis text
+                      axis.ticks = element_blank(),
+                      strip.text = element_text(size = 16, face = "bold", colour = "white")) 
+pdf(file.path(folder, "ssGSEA_Senesecence_Epi.pdf"), height = 7, width = 14)
+p
+dev.off()
+```

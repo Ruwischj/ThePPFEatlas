@@ -27,7 +27,7 @@ library(SCP)
 
 # Read in the Object
 ```{r}
-test <- readRDS("PPFE_cleaned_datasetes_ALL_RPCA_clean_integrated_22_12_2024.rds")
+test <- readRDS("./PPFE_merged_final")
 ```
 
 # Select Folder Path
@@ -35,7 +35,7 @@ test <- readRDS("PPFE_cleaned_datasetes_ALL_RPCA_clean_integrated_22_12_2024.rds
 folder <- choose.dir()
 ```
 
-# Define Color Palettes`
+# Define Color Palettes
 ```{r}
 pal_cluster_scp_pal <- c(
   # Epithelial Cells
@@ -111,9 +111,9 @@ pal_cluster_scp_pal <- c(
 ```
 
 
-# Plots
+#===============
 
-### Overall Dataset
+# Cellfrequency Plot
 ```{r, fig.width=14, fig.height=7}
 # Proportion / cell number composition per cluster
 ggData = data.frame(prop.table(table(test$Lineage, test$orig.ident_final), margin = 2))
@@ -195,11 +195,7 @@ p <- ggplot(ggData, aes(x = Orig.Ident, y = value, fill = Celltype_ID)) +
         axis.ticks.length.x = unit(0, "cm"))+
   facet_wrap(~Disease, scales = "free_x", ncol = 4) + NoLegend()+RotatedAxis()
 
-# Export to PDF and PNG File
-png((filename = file.path(folder,"Figure_1Stackedbarplots.png")), units = "in", width = 16, height = 6.5, res = 1200)
-p
-dev.off()
-
+# Export PDF 
 pdf((file = file.path(folder,"Figure_1Stackedbarplots.pdf")),width = 16, height = 6.5)
 p
 dev.off()
@@ -449,6 +445,10 @@ p
 dev.off()
 ```
 
+#===============
+
+# UMAP Plots 
+
 ## UMAP - Celltype_ID_final
 ```{r}
 p <- CellDimPlot(test, group.by = "Celltype_ID_final", raster = F, pt.size = 0.15, reduction = "ReUMAP_50", palette = "Paired", show_stat = F, xlab = "UMAP_1", ylab = "UAMP_2", legend.position = "none")+
@@ -588,73 +588,8 @@ library(writexl)
 write_xlsx(final_df, file.path(folder, "PPFE_IPF_allmerged_by_lineaeg_freq_Wilcox_rank_sum_test_merged.xlsx"))
 ```
 
-```{r}
-library(dplyr)
-library(openxlsx)
-
-# Initialize a workbook
-wb <- createWorkbook()
-
-# Germany_PPFE
-median_frequencies_Germany_PPFE <- ggData %>%
-  filter(Disease == "Germany_PPFE") %>%
-  group_by(Celltype_ID) %>%
-  summarize(
-    median_freq = mean(value),
-    sd_freq = sd(value)
-  ) %>%
-  arrange(-median_freq)
-
-addWorksheet(wb, "Germany_PPFE")
-writeData(wb, "Germany_PPFE", median_frequencies_Germany_PPFE)
-
-# France_PPFE
-median_frequencies_France_PPFE <- ggData %>%
-  filter(Disease == "France_PPFE") %>%
-  group_by(Celltype_ID) %>%
-  summarize(
-    median_freq = mean(value),
-    sd_freq = sd(value)
-  ) %>%
-  arrange(-median_freq)
-
-addWorksheet(wb, "France_PPFE")
-writeData(wb, "France_PPFE", median_frequencies_France_PPFE)
-
-# Germany_CTRL
-median_frequencies_Germany_CTRL <- ggData %>%
-  filter(Disease == "Germany_CTRL") %>%
-  group_by(Celltype_ID) %>%
-  summarize(
-    median_freq = mean(value),
-    sd_freq = sd(value)
-  ) %>%
-  arrange(-median_freq)
-
-addWorksheet(wb, "Germany_CTRL")
-writeData(wb, "Germany_CTRL", median_frequencies_Germany_CTRL)
-
-# IPF_Belgium
-median_frequencies_Dutch_IPF <- ggData %>%
-  filter(Disease == "IPF_Belgium") %>%
-  group_by(Celltype_ID) %>%
-  summarize(
-    median_freq = mean(value),
-    sd_freq = sd(value)
-  ) %>%
-  arrange(-median_freq)
-
-addWorksheet(wb, "IPF_Belgium")
-writeData(wb, "IPF_Belgium", median_frequencies_Dutch_IPF)
-
-# Save the workbook
-saveWorkbook(wb, "PPFE_IPF_Celltype_Frequencies_ALL_b1b2_RPCA.xlsx", overwrite = TRUE)
-```
-
 #======================
 # UnityHeatmap
-
-### Marker Gene Selection
 ```{r}
 Lineage_genes <- c( "FXYD3", "EPCAM", "ELF3",#"EPCAM", "SLC34A2", "KRT7", "NKX2-1",
            "COL1A2", "DCN", "MFAP4", #"COL1A1", "COL3A1", "ELN", "COL6A2",
@@ -664,7 +599,6 @@ Lineage_genes <- c( "FXYD3", "EPCAM", "ELF3",#"EPCAM", "SLC34A2", "KRT7", "NKX2-
            )
 ```
 
-### Re-Order the Celltypes
 ```{r}
 test$Celltype_ID_final_heat %>% unique()
 
@@ -686,7 +620,6 @@ test$Celltype_ID_final_heat <- factor(test$Celltype_ID_final, levels = c(
 )
 ```
 
-### Start Heatmap-Script
 ```{r}
 ### with multithreading, first make all possible combinations
 FullDataset_Object <-  test  
@@ -846,7 +779,6 @@ heatmap_df1 <-  as.matrix(collapsed.SubjectcohortCellTypeAvg.mtx[Lineage_genes,c
 heatmap_df <- heatmap_df1
 ```
 
-### Normalize by Cohort: Hannover vs. Leuven
 ```{r}
 # Pull PPFE Cells
 ppfe_cells <- heatmap_metadata %>% 
@@ -878,8 +810,6 @@ heatmap_df_normalized <- cbind(heatmap_df_ppfe_normalized, heatmap_df_ipf_normal
 heatmap_df_normalized <- heatmap_df_normalized[,cell_order]  
 ```
 
-
-### Create Ordering for column split
 ```{r, fig.width=20, fig.height=9.5}
 Epithelial = c(
     "AEC2", "AEC1", "Club", "AEC_intermediate", "Basal", "Secretory", 
@@ -1045,9 +975,4 @@ plot_list <- lapply(lineages, function(x){
 combined_plot <- ggarrange(plotlist = plot_list, ncol = 2, nrow = ceiling(length(plot_list)/2), common.legend = T)
 ggsave("Immune_Correlation_Multipanel.pdf", combined_plot, width = 6, height = 8)
 
-```
-
-# Save Final Dataset
-```{r}
-saveRDS(test, "PPFE_Germany_France_CTRL_IPF.int.11032025.rds")
 ```

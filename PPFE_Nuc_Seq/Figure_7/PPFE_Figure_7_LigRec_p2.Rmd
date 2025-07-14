@@ -1,0 +1,796 @@
+---
+title: "Immune_MultiNichenet"
+author: "Jannik Ruwisch"
+date: "2025-01-28"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T,
+                      fig.width = 14,
+                      fig.height = 7,
+                      #dpi = 1200,
+                      dev = "png",
+                      cache = F)
+```
+
+# Load libraries
+```{r}
+library(SCP)
+library(Seurat)
+library(SeuratObject)
+library(dplyr)
+library(dplyr)
+library(tidyverse)
+library(tidyseurat)
+library(ggpubr)
+```
+
+# Load Object
+```{r}
+multinichenet_output <- readRDS("./PPFE_CTRL_subsampled_Celltype_multinichenet_output.rds") # PPFE vs. CTRL
+```
+
+# Save Path
+```{r}
+# save the final seurat objects
+folder = choose.dir()
+```
+
+# Setup Multinichenet
+```{r}
+organism = "human"
+options(timeout = 120)
+if(organism == "human"){
+  
+  lr_network_all = 
+    readRDS(url(
+      "https://zenodo.org/record/10229222/files/lr_network_human_allInfo_30112033.rds"
+      )) %>% 
+    mutate(
+      ligand = convert_alias_to_symbols(ligand, organism = organism), 
+      receptor = convert_alias_to_symbols(receptor, organism = organism))
+  
+  lr_network_all = lr_network_all  %>% 
+    mutate(ligand = make.names(ligand), receptor = make.names(receptor)) 
+  
+  lr_network = lr_network_all %>% 
+    distinct(ligand, receptor)
+  
+  ligand_target_matrix = readRDS(url(
+    "https://zenodo.org/record/7074291/files/ligand_target_matrix_nsga2r_final.rds"
+    ))
+  
+  colnames(ligand_target_matrix) = colnames(ligand_target_matrix) %>% 
+    convert_alias_to_symbols(organism = organism) %>% make.names()
+  rownames(ligand_target_matrix) = rownames(ligand_target_matrix) %>% 
+    convert_alias_to_symbols(organism = organism) %>% make.names()
+  
+  lr_network = lr_network %>% filter(ligand %in% colnames(ligand_target_matrix))
+  ligand_target_matrix = ligand_target_matrix[, lr_network$ligand %>% unique()]
+  
+} else if(organism == "mouse"){
+  
+  lr_network_all = readRDS(url(
+    "https://zenodo.org/record/10229222/files/lr_network_mouse_allInfo_30112033.rds"
+    )) %>% 
+    mutate(
+      ligand = convert_alias_to_symbols(ligand, organism = organism), 
+      receptor = convert_alias_to_symbols(receptor, organism = organism))
+  
+  lr_network_all = lr_network_all  %>% 
+    mutate(ligand = make.names(ligand), receptor = make.names(receptor)) 
+  lr_network = lr_network_all %>% 
+    distinct(ligand, receptor)
+  
+  ligand_target_matrix = readRDS(url(
+    "https://zenodo.org/record/7074291/files/ligand_target_matrix_nsga2r_final_mouse.rds"
+    ))
+  
+  colnames(ligand_target_matrix) = colnames(ligand_target_matrix) %>% 
+    convert_alias_to_symbols(organism = organism) %>% make.names()
+  rownames(ligand_target_matrix) = rownames(ligand_target_matrix) %>% 
+    convert_alias_to_symbols(organism = organism) %>% make.names()
+  
+  lr_network = lr_network %>% filter(ligand %in% colnames(ligand_target_matrix))
+  ligand_target_matrix = ligand_target_matrix[, lr_network$ligand %>% unique()]
+  
+}
+```
+
+# Define Color Palettes
+```{r}
+colors_sender =  SCP::palette_scp(n = 22, palcolor =c(
+  "#E1244D",  # Aberrant_Basaloid
+  "#6A3D9A",  # Adventitial_Fb
+  "#CAB2D6",  # Adventitial_like_Fb
+  "#199784",  # AEC1
+  "#1F78B4",  # Airway_Fb
+  "#A6CEE3",  # Alveolar_Fb
+  "#FFED6F",  # B_Cells_memory
+  "#A5AA99",  # Basal
+  "#C7D98C",  # CD8_TC_resident_memory
+  "#715588",  # Club
+  "#E31A1C",  # CTHRC1_MyoFb
+  "#1D5152",  # DC2
+  "#8491B4",  # EC_aerocyte
+  "#F39B7F",  # EC_arterial
+  "#3C5488",  # EC_general_cap
+  "#00A087",  # EC_lymphatic
+  "#E64B35",  # EC_systemic_venous
+  "#C19D94",  # Fibrotic_Macrophage
+  "#F9CDE4",  # gamma_delta_TC
+  "#6A7998",  # Monocyte_Classical
+  "#BE777C",  # Monocyte_derived_Macrophage
+  "#BA7769",  # Monocyte_nonClassical
+  "#DED7DA",  # NKCellsCD16_hi
+  "#CC831E",  # Secretory
+  "#FB9A99",  # Subpleural_Fb
+  "#8DD3C7"   # Treg
+), x = senders_receivers)
+
+colors_receiver =  SCP::palette_scp(n = 22, palcolor = c(
+  "#E1244D",  # Aberrant_Basaloid
+  "#6A3D9A",  # Adventitial_Fb
+  "#CAB2D6",  # Adventitial_like_Fb
+  "#199784",  # AEC1
+  "#1F78B4",  # Airway_Fb
+  "#A6CEE3",  # Alveolar_Fb
+  "#FFED6F",  # B_Cells_memory
+  "#A5AA99",  # Basal
+  "#C7D98C",  # CD8_TC_resident_memory
+  "#715588",  # Club
+  "#E31A1C",  # CTHRC1_MyoFb
+  "#1D5152",  # DC2
+  "#8491B4",  # EC_aerocyte
+  "#F39B7F",  # EC_arterial
+  "#3C5488",  # EC_general_cap
+  "#00A087",  # EC_lymphatic
+  "#E64B35",  # EC_systemic_venous
+  "#C19D94",  # Fibrotic_Macrophage
+  "#F9CDE4",  # gamma_delta_TC
+  "#6A7998",  # Monocyte_Classical
+  "#BE777C",  # Monocyte_derived_Macrophage
+  "#BA7769",  # Monocyte_nonClassical
+  "#DED7DA",  # NKCellsCD16_hi
+  "#CC831E",  # Secretory
+  "#FB9A99",  # Subpleural_Fb
+  "#8DD3C7"   # Treg
+), x = senders_receivers)
+
+```
+
+
+#===================
+
+## Top Ligand-Receptor Pairs
+```{r}
+# Export Top 20K Lig-Receptor Pairs 
+prioritized_tbl_oi_all = get_top_n_lr_pairs(
+  multinichenet_output$prioritization_tables, 
+  top_n = 20000, 
+  rank_per_group = F
+  )
+
+writexl::write_xlsx(prioritized_tbl_oi_all, "multinichenet_top20000Pairs.xlsx")
+```
+
+
+#===========================
+
+# Myeloid
+
+## CircosPlot Fb to Myeloids
+```{r}
+prioritized_tbl_oi = 
+  multinichenet_output$prioritization_tables$group_prioritization_tbl %>%
+  filter(id %in% prioritized_tbl_oi_all$id) %>%
+  distinct(id, sender, receiver, ligand, receptor, group) %>% 
+  left_join(prioritized_tbl_oi_all)
+prioritized_tbl_oi$prioritization_score[is.na(prioritized_tbl_oi$prioritization_score)] = 0
+
+prioritized_tbl_oi
+
+# Filter for celltypes of interst from Cellchat Heatmap Clustering
+prioritized_tbl_oi <- prioritized_tbl_oi %>%
+  filter(receiver %in% c("Alveolar_Macrophage",
+  "IFNresp_Monocyte_derived_Macrophage",
+  "Monocyte_Classical",
+  "Monocyte_derived_Macrophage",
+  "Monocyte_nonClassical"
+  )) %>% 
+  filter(sender == "Adventitial_Fb" | 
+           sender == "Adventitial_like_Fb" | 
+           sender == "Subpleural_Fb" | 
+            sender == "CTHRC1_MyoFb"
+         )
+
+# Set the colors
+senders_receivers = union(prioritized_tbl_oi$sender %>% unique(), prioritized_tbl_oi$receiver %>% unique()) %>% sort()
+senders_receivers
+
+colors_sender =  SCP::palette_scp(n = 13, palcolor = c(
+ # "#E1244D", # Aberrant_Basaloid
+  "#6A3D9A", # Adventitial_Fb
+  "#CAB2D6", # Adventitial_like_Fb
+  "#FF6F00", # Alveolar_Macrophage
+  "#E31A1C", # CTHRC1_MyoFb
+  #"#94CABB", # DC1
+  #"#1D5152", # DC2
+  #"#BA4769", # Fibrotic_Macrophage | Updated
+  "#B7BBC9", # IFNresp_Monocyte_derived_Macrophage
+  #"#CB1700", # Mast
+  "#6A7998", # Monocyte_Classical
+  "#BE777C", # Monocyte_derived_Macrophage
+  "#BA7769", # Monocyte_nonClassical
+  #"#217885", # Neutro
+  "#FB9A99"  # Subpleural_Fb
+)
+, x = senders_receivers)
+
+colors_receiver =  SCP::palette_scp(n = 13, palcolor = c(
+ # "#E1244D", # Aberrant_Basaloid
+  "#6A3D9A", # Adventitial_Fb
+  "#CAB2D6", # Adventitial_like_Fb
+  "#FF6F00", # Alveolar_Macrophage
+  "#E31A1C", # CTHRC1_MyoFb
+  #"#94CABB", # DC1
+ # "#1D5152", # DC2
+#  "#BA4769", # Fibrotic_Macrophage
+  "#B7BBC9", # IFNresp_Monocyte_derived_Macrophage
+ # "#CB1700", # Mast
+  "#6A7998", # Monocyte_Classical
+  "#BE777C", # Monocyte_derived_Macrophage
+  "#BA7769", # Monocyte_nonClassical
+ # "#217885", # Neutro
+  "#FB9A99"  # Subpleural_Fb
+)
+, x = senders_receivers)
+
+circos_list = make_circos_group_comparison(prioritized_tbl_oi, colors_sender, colors_receiver)
+```
+
+
+```{r}
+png(filename = file.path(output_dir,"/CellChatffilteredCHord_toMyeloid.png"), width = 8, height = 8, units = "in", res = 600)
+cowplot::plot_grid(circos_list$PPFE)
+dev.off()
+
+
+png(filename = file.path(paste0(output_dir,"/Chord_MyeloidtoRest_PPFE.png")), width = 9, height = 9, units = "in", res = 600)
+cowplot::plot_grid(circos_list$PPFE)
+dev.off()
+
+
+pdf(file.path(paste0(output_dir,"/Chord_MyeloidtoRest_PPFE.pdf")), width = 9, height = 9)
+cowplot::plot_grid(circos_list$PPFE)
+dev.off()
+
+
+png(filename = file.path(paste0(output_dir,"/Chord_MyeloidtoRest_CTRL.png")), width = 9, height = 9, units = "in", res = 600)
+cowplot::plot_grid(circos_list$CTRL)
+dev.off()
+
+pdf(file.path(paste0(output_dir,"/Chord_MyeloidtoRest_CTRL.pdf")), width = 9, height = 9)
+cowplot::plot_grid(circos_list$CTRL)
+dev.off()
+
+
+png(filename = file.path(paste0(output_dir,"/Chord_MyeloidtoRest_legend.png")), width = 9, height = 9, units = "in", res = 600)
+print(circos_list$legend)
+dev.off()
+#======================
+pdf(file.path(paste0(output_dir,"/Chord_MyeloidtoRest_legend.pdf")), width = 9, height = 9)
+print(circos_list$legend)
+dev.off()
+
+circos_list
+```
+
+```{r}
+prioritized_tbl_oi_all = get_top_n_lr_pairs(
+  multinichenet_output$prioritization_tables, 
+  top_n = 1000, 
+  rank_per_group = FALSE
+  )
+
+prioritized_tbl_oi = 
+  multinichenet_output$prioritization_tables$group_prioritization_tbl %>%
+  filter(id %in% prioritized_tbl_oi_all$id) %>%
+  distinct(id, sender, receiver, ligand, receptor, group) %>% 
+  left_join(prioritized_tbl_oi_all)
+prioritized_tbl_oi$prioritization_score[is.na(prioritized_tbl_oi$prioritization_score)] = 0
+
+prioritized_tbl_oi
+
+# Filter for celltypes of interst 
+prioritized_tbl_oi <- prioritized_tbl_oi %>%
+  #filter(receiver %in% myeloid_cells) %>% 
+  filter(sender %in% c("Monocyte_Classical",
+                       "Monocyte_nonClassical",
+                       "Monocyte_derived_Macrophage",
+                       "Fibrotic_Macrophage",
+                       "DC2"))
+
+# Set the colors
+senders_receivers = union(prioritized_tbl_oi$sender %>% unique(), prioritized_tbl_oi$receiver %>% unique()) %>% sort()
+senders_receivers
+
+colors_sender =  SCP::palette_scp(n = 22, palcolor =c(
+  "#ff084a",  # Aberrant_Basaloid
+  "#6A3D9A",  # Adventitial_Fb
+  "#CAB2D6",  # Adventitial_like_Fb
+  "#199784",  # AEC1
+  "#1F78B4",  # Airway_Fb
+  "#A6CEE3",  # Alveolar_Fb
+  "#FFED6F",  # B_Cells_memory
+  "#A5AA99",  # Basal
+  "#C7D98C",  # CD8_TC_resident_memory
+  "#715588",  # Club
+  "#E31A1C",  # CTHRC1_MyoFb
+  "#1D5152",  # DC2
+  "#8491B4",  # EC_aerocyte
+  "#F39B7F",  # EC_arterial
+  "#3C5488",  # EC_general_cap
+  "#00A087",  # EC_lymphatic
+  "#E64B35",  # EC_systemic_venous
+  "#BA4769",  # Fibrotic_Macrophage
+  "#F9CDE4",  # gamma_delta_TC
+  "#6A7998",  # Monocyte_Classical
+  "#BE777C",  # Monocyte_derived_Macrophage
+  "#BA7769",  # Monocyte_nonClassical
+  "#DED7DA",  # NKCellsCD16_hi
+  "#CC831E",  # Secretory
+  "#FB9A99",  # Subpleural_Fb
+  "#8DD3C7"   # Treg
+)
+
+
+, x = senders_receivers)
+
+colors_receiver =  SCP::palette_scp(n = 22, palcolor = c(
+  "#ff084a",  # Aberrant_Basaloid
+  "#6A3D9A",  # Adventitial_Fb
+  "#CAB2D6",  # Adventitial_like_Fb
+  "#199784",  # AEC1
+  "#1F78B4",  # Airway_Fb
+  "#A6CEE3",  # Alveolar_Fb
+  "#FFED6F",  # B_Cells_memory
+  "#A5AA99",  # Basal
+  "#C7D98C",  # CD8_TC_resident_memory
+  "#715588",  # Club
+  "#E31A1C",  # CTHRC1_MyoFb
+  "#1D5152",  # DC2
+  "#8491B4",  # EC_aerocyte
+  "#F39B7F",  # EC_arterial
+  "#3C5488",  # EC_general_cap
+  "#00A087",  # EC_lymphatic
+  "#E64B35",  # EC_systemic_venous
+  "#BA4769",  # Fibrotic_Macrophage |color updated
+  "#F9CDE4",  # gamma_delta_TC
+  "#6A7998",  # Monocyte_Classical
+  "#BE777C",  # Monocyte_derived_Macrophage
+  "#BA7769",  # Monocyte_nonClassical
+  "#DED7DA",  # NKCellsCD16_hi
+  "#CC831E",  # Secretory
+  "#FB9A99",  # Subpleural_Fb
+  "#8DD3C7"   # Treg
+), x = senders_receivers)
+
+circos_list = make_circos_group_comparison(prioritized_tbl_oi, colors_sender, colors_receiver)
+
+png(filename = file.path(paste0(output_dir,"/Chord_MyeloidtoRest_PPFE.png")), width = 9, height = 9, units = "in", res = 600)
+cowplot::plot_grid(circos_list$PPFE)
+dev.off()
+
+png(filename = file.path(paste0(output_dir,"/Chord_MyeloidtoRest_CTRL.png")), width = 9, height = 9, units = "in", res = 600)
+cowplot::plot_grid(circos_list$CTRL)
+dev.off()
+
+png(filename = file.path(paste0(output_dir,"/Chord_MyeloidtoRest_legend.png")), width = 9, height = 9, units = "in", res = 600)
+cowplot::plot_grid(circos_list$CTRL)
+dev.off()
+
+```
+
+
+
+```{r}
+prioritized_tbl_oi_all = get_top_n_lr_pairs(
+  multinichenet_output$prioritization_tables, 
+  top_n = 1000, 
+  rank_per_group = FALSE
+  )
+
+prioritized_tbl_oi = 
+  multinichenet_output$prioritization_tables$group_prioritization_tbl %>%
+  filter(id %in% prioritized_tbl_oi_all$id) %>%
+  distinct(id, sender, receiver, ligand, receptor, group) %>% 
+  left_join(prioritized_tbl_oi_all)
+prioritized_tbl_oi$prioritization_score[is.na(prioritized_tbl_oi$prioritization_score)] = 0
+
+prioritized_tbl_oi
+
+# Filter for celltypes of interst 
+prioritized_tbl_oi <- prioritized_tbl_oi %>%
+  #filter(receiver %in% myeloid_cells) %>% 
+  filter(sender %in% c("Monocyte_Classical",
+                       "Monocyte_nonClassical",
+                       "Monocyte_derived_Macrophage",
+                       "Fibrotic_Macrophage",
+                       "DC2"))
+
+# Set the colors
+senders_receivers = union(prioritized_tbl_oi$sender %>% unique(), prioritized_tbl_oi$receiver %>% unique()) %>% sort()
+senders_receivers
+
+colors_sender =  SCP::palette_scp(n = 22, palcolor =c(
+  "#E1244D",  # Aberrant_Basaloid
+  "#6A3D9A",  # Adventitial_Fb
+  "#CAB2D6",  # Adventitial_like_Fb
+  "#199784",  # AEC1
+  "#1F78B4",  # Airway_Fb
+  "#A6CEE3",  # Alveolar_Fb
+  "#FFED6F",  # B_Cells_memory
+  "#A5AA99",  # Basal
+  "#C7D98C",  # CD8_TC_resident_memory
+  "#715588",  # Club
+  "#E31A1C",  # CTHRC1_MyoFb
+  "#1D5152",  # DC2
+  "#8491B4",  # EC_aerocyte
+  "#F39B7F",  # EC_arterial
+  "#3C5488",  # EC_general_cap
+  "#00A087",  # EC_lymphatic
+  "#E64B35",  # EC_systemic_venous
+  "#C19D94",  # Fibrotic_Macrophage
+  "#F9CDE4",  # gamma_delta_TC
+  "#6A7998",  # Monocyte_Classical
+  "#BE777C",  # Monocyte_derived_Macrophage
+  "#BA7769",  # Monocyte_nonClassical
+  "#DED7DA",  # NKCellsCD16_hi
+  "#CC831E",  # Secretory
+  "#FB9A99",  # Subpleural_Fb
+  "#8DD3C7"   # Treg
+)
+
+
+, x = senders_receivers)
+
+colors_receiver =  SCP::palette_scp(n = 22, palcolor = c(
+  "#E1244D",  # Aberrant_Basaloid
+  "#6A3D9A",  # Adventitial_Fb
+  "#CAB2D6",  # Adventitial_like_Fb
+  "#199784",  # AEC1
+  "#1F78B4",  # Airway_Fb
+  "#A6CEE3",  # Alveolar_Fb
+  "#FFED6F",  # B_Cells_memory
+  "#A5AA99",  # Basal
+  "#C7D98C",  # CD8_TC_resident_memory
+  "#715588",  # Club
+  "#E31A1C",  # CTHRC1_MyoFb
+  "#1D5152",  # DC2
+  "#8491B4",  # EC_aerocyte
+  "#F39B7F",  # EC_arterial
+  "#3C5488",  # EC_general_cap
+  "#00A087",  # EC_lymphatic
+  "#E64B35",  # EC_systemic_venous
+  "#C19D94",  # Fibrotic_Macrophage
+  "#F9CDE4",  # gamma_delta_TC
+  "#6A7998",  # Monocyte_Classical
+  "#BE777C",  # Monocyte_derived_Macrophage
+  "#BA7769",  # Monocyte_nonClassical
+  "#DED7DA",  # NKCellsCD16_hi
+  "#CC831E",  # Secretory
+  "#FB9A99",  # Subpleural_Fb
+  "#8DD3C7"   # Treg
+), x = senders_receivers)
+
+circos_list = make_circos_group_comparison(prioritized_tbl_oi, colors_sender, colors_receiver)
+
+png(filename = file.path(paste0(output_dir,"/Chord_MyeloidtoRest_PPFE.png")), width = 9, height = 9, units = "in", res = 600)
+cowplot::plot_grid(circos_list$PPFE)
+dev.off()
+
+png(filename = file.path(paste0(output_dir,"/Chord_MyeloidtoRest_CTRL.png")), width = 9, height = 9, units = "in", res = 600)
+cowplot::plot_grid(circos_list$CTRL)
+dev.off()
+
+png(filename = file.path(paste0(output_dir,"/Chord_MyeloidtoRest_legend.png")), width = 9, height = 9, units = "in", res = 600)
+cowplot::plot_grid(circos_list$CTRL)
+dev.off()
+```
+
+
+```{r}
+prioritized_tbl_oi_all = get_top_n_lr_pairs(
+  multinichenet_output$prioritization_tables, 
+  top_n = 2000, 
+  rank_per_group = FALSE
+  )
+
+prioritized_tbl_oi = 
+  multinichenet_output$prioritization_tables$group_prioritization_tbl %>%
+  filter(id %in% prioritized_tbl_oi_all$id) %>%
+  distinct(id, sender, receiver, ligand, receptor, group) %>% 
+  left_join(prioritized_tbl_oi_all)
+prioritized_tbl_oi$prioritization_score[is.na(prioritized_tbl_oi$prioritization_score)] = 0
+
+prioritized_tbl_oi
+
+# Filter for celltypes of interst 
+prioritized_tbl_oi <- prioritized_tbl_oi %>%
+  #filter(receiver %in% myeloid_cells) %>% 
+  filter(sender %in% c("Monocyte_Classical",
+                       "Monocyte_nonClassical",
+                       "Monocyte_derived_Macrophage",
+                       "Fibrotic_Macrophage",
+                       "DC2"))
+
+# Set the colors
+senders_receivers = union(prioritized_tbl_oi$sender %>% unique(), prioritized_tbl_oi$receiver %>% unique()) %>% sort()
+senders_receivers
+
+colors_sender =  SCP::palette_scp(n = 22, palcolor =c(
+  "#E1244D",  # Aberrant_Basaloid
+  "#6A3D9A",  # Adventitial_Fb
+  "#CAB2D6",  # Adventitial_like_Fb
+  "#199784",  # AEC1
+  "#1F78B4",  # Airway_Fb
+  "#A6CEE3",  # Alveolar_Fb
+  "#FFED6F",  # B_Cells_memory
+  "#A5AA99",  # Basal
+  "#C7D98C",  # CD8_TC_resident_memory
+  "#715588",  # Club
+  "#E31A1C",  # CTHRC1_MyoFb
+  "#1D5152",  # DC2
+  "#8491B4",  # EC_aerocyte
+  "#F39B7F",  # EC_arterial
+  "#3C5488",  # EC_general_cap
+  "#00A087",  # EC_lymphatic
+  "#E64B35",  # EC_systemic_venous
+  "#C19D94",  # Fibrotic_Macrophage
+  "#F9CDE4",  # gamma_delta_TC
+  "#6A7998",  # Monocyte_Classical
+  "#BE777C",  # Monocyte_derived_Macrophage
+  "#BA7769",  # Monocyte_nonClassical
+  "#DED7DA",  # NKCellsCD16_hi
+  "#CC831E",  # Secretory
+  "#FB9A99",  # Subpleural_Fb
+  "#8DD3C7"   # Treg
+)
+
+
+, x = senders_receivers)
+
+colors_receiver =  SCP::palette_scp(n = 22, palcolor = c(
+  "#E1244D",  # Aberrant_Basaloid
+  "#6A3D9A",  # Adventitial_Fb
+  "#CAB2D6",  # Adventitial_like_Fb
+  "#199784",  # AEC1
+  "#1F78B4",  # Airway_Fb
+  "#A6CEE3",  # Alveolar_Fb
+  "#FFED6F",  # B_Cells_memory
+  "#A5AA99",  # Basal
+  "#C7D98C",  # CD8_TC_resident_memory
+  "#715588",  # Club
+  "#E31A1C",  # CTHRC1_MyoFb
+  "#1D5152",  # DC2
+  "#8491B4",  # EC_aerocyte
+  "#F39B7F",  # EC_arterial
+  "#3C5488",  # EC_general_cap
+  "#00A087",  # EC_lymphatic
+  "#E64B35",  # EC_systemic_venous
+  "#C19D94",  # Fibrotic_Macrophage
+  "#F9CDE4",  # gamma_delta_TC
+  "#6A7998",  # Monocyte_Classical
+  "#BE777C",  # Monocyte_derived_Macrophage
+  "#BA7769",  # Monocyte_nonClassical
+  "#DED7DA",  # NKCellsCD16_hi
+  "#CC831E",  # Secretory
+  "#FB9A99",  # Subpleural_Fb
+  "#8DD3C7"   # Treg
+), x = senders_receivers)
+
+circos_list = make_circos_group_comparison(prioritized_tbl_oi, colors_sender, colors_receiver)
+
+png(filename = file.path(paste0(output_dir,"/Chord_MyeloidtoRest.png")), width = 8, height = 8, units = "in", res = 600)
+cowplot::plot_grid(circos_list$PPFE)
+dev.off()
+```
+
+#====================
+# Lymphoid
+
+## Bubble Plot
+```{r, fig.height=12, fig.width=20}
+group_oi = "PPFE"
+receiver_oi_output = "CTHRC1_MyoFb"
+receiver_oi = "CTHRC1_MyoFb"
+
+lymphocytes <- c(
+  "Treg",
+  "gamma_delta_TC",
+  "CD8_TC_effector_memory",
+  "CD4_TC_effector",
+  "CD4_TC_naive",
+  "CD4_TC_Cytotoxic",
+  "CD8_TC_resident_memory",
+  "B_Cells_memory",
+  "B_Cells_naive",
+  "NKCellsCD16_hi",
+  "NKCellsCD16_lo",
+  "ILC3"
+)
+senders_oi_output = lymphocytes
+
+prioritized_tbl_oi_M_50 = get_top_n_lr_pairs(
+  multinichenet_output$prioritization_tables, 
+  500, 
+  groups_oi = group_oi, 
+  senders_oi = senders_oi_output,
+  receivers_oi = receiver_oi_output
+  ) 
+
+#==================
+# Align Ligands with Target Plot
+lr_target_prior_cor_filtered = multinichenet_output$lr_target_prior_cor %>%
+  inner_join(
+    multinichenet_output$ligand_activities_targets_DEgenes$ligand_activities %>% 
+      distinct(ligand, target, direction_regulation, contrast)
+    ) %>% 
+  inner_join(contrast_tbl) %>% filter(group == group_oi, receiver == receiver_oi, sender %in% lymphocytes)
+
+corell_plot_ids <- lr_target_prior_cor_filtered$id %>% unique()
+#===============
+
+prioritized_tbl_oi_M_50 <- prioritized_tbl_oi_M_50 %>%
+  filter(id %in% corell_plot_ids)
+
+plot_oi = make_sample_lr_prod_activity_plots_Omnipath(
+  multinichenet_output$prioritization_tables, 
+  prioritized_tbl_oi_M_50 %>% inner_join(lr_network_all)
+  )
+plot_oi
+
+# Export as PDF 
+pdf(file = file.path(output_dir,
+                         paste0("BubblePlot_MultiNichenet_","lymphocytes", "_to_", 
+                                receiver_oi_output , "Fig7v2.pdf")), 
+                      width = 20, 
+                      height = 12)
+plot_oi
+dev.off()
+```
+
+### Target and Pseuodbulk-Product Plot
+```{r, fig.width=30, fig.height=40}
+top_n_target =10000
+senders_oi_output = lymphocytes
+
+group_oi = "PPFE"
+receiver_oi = "CTHRC1_MyoFb"
+lr_target_prior_cor_filtered = multinichenet_output$lr_target_prior_cor %>%
+  inner_join(
+    multinichenet_output$ligand_activities_targets_DEgenes$ligand_activities %>% 
+      distinct(ligand, target, direction_regulation, contrast)
+    ) %>% 
+  inner_join(contrast_tbl) %>% filter(group == group_oi, 
+                                      receiver == receiver_oi, 
+                                      sender %in% lymphocytes)
+
+lr_target_prior_cor_filtered_up = lr_target_prior_cor_filtered %>% 
+  filter(direction_regulation == "up") %>% 
+  filter( (rank_of_target < top_n_target) & (pearson > 0.33)) # replace pearson by spearman if you want to filter on the spearman correlation
+lr_target_prior_cor_filtered_down = lr_target_prior_cor_filtered %>% 
+  filter(direction_regulation == "down") %>% 
+  filter( (rank_of_target < top_n_target) & (pearson < -0.33)) # downregulation -- negative correlation - # replace pearson by spearman if you want to filter on the spearman correlation
+lr_target_prior_cor_filtered = bind_rows(
+  lr_target_prior_cor_filtered_up, 
+  lr_target_prior_cor_filtered_down)
+
+
+prioritized_tbl_oi = get_top_n_lr_pairs(
+  multinichenet_output$prioritization_tables, 
+  5000, senders_oi = senders_oi_output, #5000
+  groups_oi = group_oi, 
+  receivers_oi = receiver_oi)
+
+lr_target_correlation_plot = make_lr_target_correlation_plot(widths = c(1.5,2,1,1), heights = c(2,2,1,1),
+  multinichenet_output$prioritization_tables, 
+  prioritized_tbl_oi,  
+  lr_target_prior_cor_filtered , 
+  multinichenet_output$grouping_tbl, 
+  multinichenet_output$celltype_info, 
+  receiver_oi,
+  plot_legend = FALSE)
+lr_target_correlation_plot$combined_plot
+lr_target_correlation_plot$legends
+
+# Export 
+png(file.path(output_dir,"Lymph_to_CHRTC1_lig_targ.png"), width = 30, height = 40, res = 300, units = "in")
+lr_target_correlation_plot$combined_plot
+dev.off()
+
+pdf(file.path(output_dir,"Lymph_to_CHRTC1_lig_targ.pdf"), width = 25, height = 15) # 30 u 40
+lr_target_correlation_plot$combined_plot
+dev.off()
+
+pdf(file.path(output_dir,"Lymph_to_CHRTC1_lig_targ_legends2.pdf"), width = 10, height = 10)
+lr_target_correlation_plot$legends
+dev.off()
+```
+
+### Enrichment of Target Genes
+```{r, fig.width=6, fig.height=7}
+# Get the top targets for Downstream-Enrichment Analysis
+lr_target_correlation_plot$combined_plot[[2]]$data %>% view()
+lr_target_correlation_plot$combined_plot[[2]]$data$lr_interaction %>% unique()
+
+lr_target_correlation_plot$combined_plot[[2]]$data %>%
+  filter(direction_regulation == "up" & lr_interaction %in% c("TGFB1 - APP",
+                                                              "TGFB1 - ITGAV",
+                                                              "TGFB1 - ITGB1",
+                                                              "TGFB1 - PDGFRA")) %>% 
+  pull("target") %>%
+  unique() %>%
+  as.character()-> TopRegulatedGenes
+
+
+TopRegulatedGenes
+
+# EnrichR Plot 
+library(enrichplot)
+library(enrichR)
+
+# Enrichment analysis
+listEnrichrSites()
+setEnrichrSite("Enrichr")
+websiteLive <- TRUE
+dbs <- c("Reactome_Pathways_2024", "KEGG_2021_Human", "GO_Biological_Process_2021")
+# IPF vs CNT DEGs
+enriched <- enrichr(TopRegulatedGenes, dbs) 
+
+exp<-enriched$Reactome_Pathways_2024
+exp$Ref<-c("Reactome_Pathways_2024")
+exp_temp<-enriched$GO_Biological_Process_2021
+exp_temp$Ref<-c("GO_Biological_Process_2021")
+exp<-rbind(exp, exp_temp)
+exp_temp<-enriched$KEGG_2021_Human
+exp_temp$Ref<-c("KEGG_2021_Human")
+exp<-rbind(exp, exp_temp)
+exp$cluster<-c("UP")
+
+exp_enrich<-subset(exp, exp$Adjusted.P.value<0.05& Ref == "Reactome_Pathways_2024")
+
+# Count how many gene elements per term
+exp_enrich$temp<-gsub(";", "", exp_enrich$Genes)
+exp_enrich$num<-(nchar(exp_enrich$Genes)-nchar(exp_enrich$temp)) + 1
+exp_enrich$temp<-NULL
+writexl::write_xlsx(exp_enrich,paste0(output_dir,"/PPFE_CTHRC1_MyoFb_TopTargets_EC_Lymphatic_TGFB1.xlsx"))
+
+temp<-subset(exp_enrich, Combined.Score>50)
+temp$Adjusted.P.value <- -log10(temp$Adjusted.P.value)
+
+temp %>% 
+ arrange(desc(Adjusted.P.value)) %>%
+top_n(5, wt = Adjusted.P.value) -> temp
+
+neworder<-data.frame(Term=temp$Term, score=temp$Adjusted.P.value)
+neworder<-aggregate(. ~Term, neworder, sum)
+neworder<-neworder[order(neworder$score, decreasing = F),]
+temp$x<-factor(temp$Term, levels =neworder$Term)
+temp<-subset(temp, is.na(temp$x)==F)
+temp<-droplevels(temp)
+p <- ggplot(temp, aes(Adjusted.P.value, x, fill=cluster)) + 
+         geom_col(position = "stack") + theme_scp() + theme(axis.text.y = element_text(size=rel(0.5), color = "black", face = "bold"), legend.position = "none", legend.title=element_blank()) + ylab(NULL) + xlab("-log10(adj. p-val")+ 
+  scale_fill_manual(values = c("#E31A1C")) +
+  ggtitle("Geneset Overrepresentation - Epithelium",
+          subtitle = "Enrichment in CTHRC1_MyoFb")
+
+# Export as PDF
+pdf(file.path(paste0(output_dir,"/GOBP_enrichment_CTHRC1_MyoFb_TGFB1_Target_genes.pdf")), 
+    width = 6 ,
+    height = 4)
+p
+dev.off()
+```

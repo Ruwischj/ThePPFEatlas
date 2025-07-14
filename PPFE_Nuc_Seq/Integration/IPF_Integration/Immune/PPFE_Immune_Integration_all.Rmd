@@ -1,0 +1,233 @@
+---
+title: "PPFE_integrated_b1_b2_epithelium"
+author: "Jannik Ruwisch"
+date: "2024-10-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T,
+                      fig.width = 14,
+                      fig.height = 7,
+                      dev = "png",
+                      cache = F)
+```
+
+```{r}
+library(SCP)
+library(Seurat)
+library(SeuratObject)
+library(dplyr)
+library(tidyverse)
+library(tidyseurat)
+library(ggpubr)
+library(data.table)
+library(magrittr)
+```
+
+# Load_Dataset
+```{r}
+PPFE_Immune <- readRDS("./PPFE_Endo_Immune_raw.rds")
+md <- PPFE_Immune@meta.data %>% as.data.table
+md[, .N, by = c("orig.ident")]
+min(table(PPFE_epi$orig.ident))
+```
+
+# 1. Subset Immune Population
+```{r}
+# find smallest dataset
+min(table(PPFE_Imm$orig.ident))
+```
+
+# 2 Perform Re-Embedding and ReClustering
+```{r}
+# Set the default assay to "RNA"
+DefaultAssay(PPFE_Imm) <- "RNA"
+
+# Create Subject List for integration
+PPFE_Imm.list <- SplitObject(PPFE_Imm, split.by = "orig.ident")
+
+# FindVarFeatures to increase feature sensitivity in the subset
+PPFE_Imm.list <- lapply(X = PPFE_Imm.list, FUN = function(x) {
+    x <- NormalizeData(x, verbose = FALSE)
+    x <- FindVariableFeatures(x, verbose = FALSE, nfeatures = 2000)
+})
+
+features <- SelectIntegrationFeatures(object.list = PPFE_Imm.list)
+
+## remove mito genes as integrator
+features <- features[-grep("MT-", features)]
+
+PPFE_Imm.list <- lapply(X = PPFE_Imm.list, FUN = function(x) {
+    x <- ScaleData(x, features = features, vars.to.regress = c("nCount_RNA"), verbose = FALSE)
+    x <- RunPCA(x, features = features, verbose = FALSE, npcs = 50) 
+})
+
+# Find Integration anchors
+anchors <- FindIntegrationAnchors(object.list = PPFE_Imm.list, reduction = "rpca", dims = 1:50)
+```
+
+# A) RPCA integration - Iteration 1
+```{r}
+PPFE_Imm_int <- IntegrateData(anchorset = anchors)
+```
+
+### Reclustering
+```{r}
+PPFE_Imm_int <- ScaleData(PPFE_Imm_int, verbose = FALSE,  vars.to.regress="percent.mt")
+PPFE_Imm_int <- RunPCA(PPFE_Imm_int, verbose = FALSE, npcs = 100)
+PPFE_Imm_int <- RunUMAP(PPFE_Imm_int, dims = 1:50)
+PPFE_Imm_int <- FindNeighbors(PPFE_Imm_int, reduction = "pca", dims = 1:100)
+PPFE_Imm_int <- FindClusters(PPFE_Imm_int, resolution = 2)
+```
+
+### QC
+```{r}
+CellDimPlot(PPFE_Imm_int, group.by = c("Celltype_ID_Coarse", "integrated_snn_res.2"), combine = T, label = T, label_insitu = T)
+CellDimPlot(PPFE_Imm_int, group.by = c("integrated_snn_res.2", "orig.ident"), combine = T)
+FeatureDimPlot(PPFE_Imm_int, features = c("nCount_RNA", "nFeature_RNA", "percent.mt"))
+```
+
+### Embedding
+```{r, fig.width=10, fig.height=5}
+CellDimPlot(PPFE_Imm_int, group.by = c("integrated_snn_res.2"), reduction = "ReUMAP_50", combine = T, label_insitu = T, label = T)
+```
+
+### DEGs
+```{r}
+PPFE_Imm_int <- RunDEtest(srt = PPFE_Imm_int, group_by = "integrated_snn_res.2", fc.threshold = 2, only.pos = T, assay = "RNA")
+```
+```{r}
+DEGs_Imm <- PPFE_Imm_int@tools$DEtest_integrated_snn_res.2$AllMarkers_wilcox
+```
+```{r}
+DEGs_Imm <- DEGs_Imm[with(DEGs_Imm, avg_log2FC > 0.3 & p_val_adj < 0.05), ] # Filtering all > 0.3 for FOR Dixit Jonas aus Sci Adv Paper
+
+DEGs_Imm <- DEGs_Imm %>%
+  group_by(group1) %>%
+  slice_max(n = 100, order_by = avg_log2FC)
+writexl::write_xlsx(DEGs_Imm, "DEGs_Imm_top100_SNN_2_PPFE.xlsx")
+DEGs_Imm
+```
+
+```{r}
+knitr::include_graphics("Cleaning_1.png")
+```
+
+### Cleaning
+```{r}
+# Remove dblts and Trash
+PPFE_Imm_int_clean <- subset(PPFE_Imm_int, integrated_snn_res.2 != 31 & 
+                              integrated_snn_res.2 != 33 & 
+                              integrated_snn_res.2 != 16 & 
+                              integrated_snn_res.2 != 18 & 
+                              integrated_snn_res.2 != 30 & 
+                              integrated_snn_res.2 != 32 & 
+                              integrated_snn_res.2 != 22 & 
+                              integrated_snn_res.2 != 40)
+
+CellDimPlot(PPFE_Imm_int_clean, group.by = "integrated_snn_res.2",label = T, label_insitu = T)
+```
+
+#==================================================
+
+# B) RPCA integratation: Cleaning Step 2
+```{r}
+# find smallest dataset
+min(table(PPFE_Imm_int_clean$orig.ident))
+```
+
+```{r}
+# Set the default assay to "RNA"
+DefaultAssay(PPFE_Imm_int_clean) <- "RNA"
+
+# Create Subject List for integration
+PPFE_Imm.list <- SplitObject(PPFE_Imm_int_clean, split.by = "orig.ident")
+```
+
+
+```{r}
+PPFE_Imm.list <- lapply(X = PPFE_Imm.list, FUN = function(x) {
+    x <- NormalizeData(x, verbose = FALSE)
+    x <- FindVariableFeatures(x, verbose = FALSE, nfeatures = 2000)
+})
+
+features <- SelectIntegrationFeatures(object.list = PPFE_Imm.list)
+
+## remove mito genes as integrator
+features <- features[-grep("MT-", features)]
+
+PPFE_Imm.list <- lapply(X = PPFE_Imm.list, FUN = function(x) {
+    x <- ScaleData(x, features = features, vars.to.regress = c("nCount_RNA"), verbose = FALSE)
+    x <- RunPCA(x, features = features, verbose = FALSE, npcs = 50) 
+})
+
+# Find Integration anchors
+anchors <- FindIntegrationAnchors(object.list = PPFE_Imm.list, reduction = "rpca", dims = 1:50#, k.filter = 90
+                                  )
+```
+
+## RPCA integration
+```{r}
+PPFE_Imm._int_clean2 <-IntegrateData(anchorset = anchors, k.weight = 30)
+```
+
+### Reclustering
+```{r}
+PPFE_Imm._int_clean2 <- ScaleData(PPFE_Imm._int_clean2, verbose = FALSE, vars.to.regress="percent.mt")
+PPFE_Imm._int_clean2 <- RunPCA(PPFE_Imm._int_clean2, verbose = FALSE, npcs = 100)
+PPFE_Imm._int_clean2 <- RunUMAP(PPFE_Imm._int_clean2, dims = 1:100)
+PPFE_Imm._int_clean2 <- FindNeighbors(PPFE_Imm._int_clean2, reduction = "pca", dims = 1:100)
+PPFE_Imm._int_clean2 <- FindClusters(PPFE_Imm._int_clean2, resolution = 2)
+```
+
+### UMAP Resolutions
+```{r, fig.width=14}
+PPFE_Imm._int_clean2 <- RunUMAP2(object = PPFE_Im._int_clean2, dims = 1:100, reduction = "pca", reduction.name = "ReUMAP_100", reduction.key = "ReUMAP_100")
+PPFE_Imm._int_clean2 <- RunUMAP2(object = PPFE_Im._int_clean2, dims = 1:75, reduction = "pca", reduction.name = "ReUMAP_75", reduction.key = "ReUMAP_75")
+PPFE_Imm._int_clean2 <- RunUMAP2(object = PPFE_Im._int_clean2, dims = 1:50, reduction = "pca", reduction.name = "ReUMAP_50", reduction.key = "ReUMAP_50")
+PPFE_Imm._int_clean2 <- RunUMAP2(object = PPFE_Im._int_clean2, dims = 1:30, reduction = "pca", reduction.name = "ReUMAP_30", reduction.key = "ReUMAP_30")
+PPFE_Imm._int_clean2 <- RunUMAP2(object = PPFE_Im._int_clean2, dims = 1:15, reduction = "pca", reduction.name = "ReUMAP_15", reduction.key = "ReUMAP_15")
+PPFE_Imm._int_clean2 <- RunUMAP2(object = PPFE_Im._int_clean2, dims = 1:10, reduction = "pca", reduction.name = "ReUMAP_10", reduction.key = "ReUMAP_10")
+PPFE_Imm._int_clean2 <- RunUMAP2(object = PPFE_Im._int_clean2, dims = 1:8, reduction = "pca", reduction.name = "ReUMAP_08", reduction.key = "ReUMAP_08")
+PPFE_Imm._int_clean2 <- RunUMAP2(object = PPFE_Im._int_clean2, dims = 1:7, reduction = "pca", reduction.name = "ReUMAP_07", reduction.key = "ReUMAP_07")
+PPFE_Imm._int_clean2 <- RunUMAP2(object = PPFE_Im._int_clean2, dims = 1:5, reduction = "pca", reduction.name = "ReUMAP_05", reduction.key = "ReUMAP_05")
+```
+
+### QC
+```{r}
+CellDimPlot(PPFE_Imm._int_clean2, group.by = c("Celltype_ID_Coarse", "integrated_snn_res.2"), reduction = "ReUMAP_100", combine = T, label = T, label_insitu = T)
+CellDimPlot(PPFE_Imm._int_clean2, group.by = c("integrated_snn_res.2", "orig.ident"), reduction = "ReUMAP_100", combine = F, label_insitu = T, label = T)
+FeatureDimPlot(PPFE_Imm._int_clean2, features = c("nCount_RNA", "nFeature_RNA", "percent.mt"))
+
+CellDimPlot(PPFE_Imm._int_clean2, group.by = c("Celltype_ID_Coarse", "integrated_snn_res.2"), reduction = "ReUMAP_100", combine = T, label = T, label_insitu = T)
+Seurat::DimPlot(PPFE_Imm._int_clean2, group.by = c("disease.ident", "integrated_snn_res.2"), combine = T, label = T, shuffle = T)
+
+CellDimPlot(PPFE_Imm._int_clean2, group.by = c("integrated_snn_res.2", "orig.ident"), reduction = "ReUMAP_100", combine = F, label_insitu = T, label = T)
+FeatureDimPlot(PPFE_Imm._int_clean2, features = c("nCount_RNA", "nFeature_RNA", "percent.mt", "PTPRC"), nrow = 2, reduction = "ReUMAP_100", assay = "RNA")
+```
+
+### DEGs
+```{r}
+PPFE_Imm._int_clean2 <- RunDEtest(srt = PPFE_Imm._int_clean2, group_by = "integrated_snn_res.2", fc.threshold = 2, only.pos = T, assay = "RNA")
+```
+```{r}
+PPFE_Imm.list_marker <- PPFE_Imm._int_clean2@tools$DEtest_integrated_snn_res.2$AllMarkers_wilcox
+PPFE_Imm.list_marker
+```
+```{r}
+PPFE_Imm.list_marker <- PPFE_Imm.list_marker[with(PPFE_Imm.list_marker, avg_log2FC > 0.3 & p_val_adj < 0.05), ] 
+
+PPFE_Imm.list_marker <- PPFE_Imm.list_marker %>%
+  group_by(group1) %>%
+  slice_max(n = 100, order_by = avg_log2FC)
+writexl::write_xlsx(PPFE_Imm.list_marker, "PPFE_DEGs_Imm_cleaned_round_2_top100_SNN_2_Nr2.xlsx")
+PPFE_Imm.list_marker
+```
+
+#========================
+
+# save
+```{r}
+saveRDS(PPFE_Imm._int_clean2, file.path(folder, "PPFE_Immune_all_run2_19_06_2024.rds"))
+```

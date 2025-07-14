@@ -1,0 +1,1233 @@
+---
+title: "PPFE"
+author: "Jannik Ruwisch"
+date: "2024-10-03"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T,
+                      fig.width = 14,
+                      fig.height = 7,
+                      dpi = 300,
+                      dev = "png",
+                      cache = F,
+                      fig.path= "/mnt/dzl_bioinf/ruwischj/scRNA_Seq/PPFE_Nuclei_Seq/PPFE_Batch_2_french/")
+```
+
+
+# INFO
+```{r}
+# INfos
+## Dataset was created with 10X Flex Tech >> Lower UMIs, Features and Counts than Xenium ! 
+```
+
+# Packages
+```{r}
+library(SCP)
+library(Seurat)
+library(SeuratObject)
+library(dplyr)
+library(tidyverse)
+library(tidyseurat)
+library(viridis)
+library(RColorBrewer)
+library(scales)
+library(circlize)
+library(monocle3)
+library(ComplexHeatmap)
+library(cowplot)
+```
+
+
+# Load 10X FLEX Dataset
+```{r}
+PPFE_raw <- load("/mnt/dzl_bioinf/ruwischj/scRNA_Seq/PPFE_Nuclei_Seq/PPFE_Batch_2_french/PPFE.CTRL.merged.19092024.Robj") # Batch  2
+PPFE_raw <- UpdateSeuratObject(PPFE.obj)
+rm(PPFE.obj)
+Version(PPFE_raw)
+PPFE_raw@meta.data$orig.ident %>% unique()
+PPFE_raw <- PPFE_raw %>%
+  mutate(disease.ident = substr(PPFE_raw$orig.ident, 1,4)
+         )
+```
+
+## Subset Batch2
+```{r}
+# List of idents in Batch2
+Batch2_IDs <- c( "PPFE_PPFE21", 
+ "PPFE_PPFE22", 
+ "PPFE_PPFE25", 
+ "PPFE_PPFE26", 
+ "PPFE_PPFE27", 
+ "PPFE_PPFE28", 
+ "PPFE_PPFE29", 
+ "PPFE_PPFE30", 
+ "PPFE_PPFE31", 
+ "PPFE_PPFE32", 
+ "PPFE_PPFE33", 
+ "PPFE_PPFE34", 
+ "PPFE_PPFE35", 
+ "PPFE_PPFE37", 
+ "PPFE_PPFE38", 
+ "PPFE_PPFE40", 
+ "CTRL_CTR056", 
+ "CTRL_CTR058", 
+ "PPFE_PPFE23", 
+ "PPFE_PPFE24", 
+ "PPFE_PPFE36", 
+ "PPFE_PPFE39", 
+ "PPFE_PPFE41", 
+ "PPFE_PPFE42", 
+ "PPFE_PPFE43", 
+ "PPFE_PPFE44")
+
+Batch2_Han_IDs <- c("PPFE_PPFE40", 
+                    "PPFE_PPFE41", 
+                    "PPFE_PPFE42",
+                    "PPFE_PPFE43",
+                    "PPFE_PPFE44",
+                    "CTRL_CTR056", # CAVE Bad Mapping QC !
+                    "CTRL_CTR058")
+
+PPFE_raw <- PPFE_raw %>%
+  mutate(Batch = case_when(orig.ident %in% Batch2_IDs ~ "Batch2",
+                           .default = "Batch1"),
+         Cohort = case_when(orig.ident %in% Batch2_Han_IDs ~ "Germany",
+                            .default = "France")
+         )
+
+table(PPFE_raw$orig.ident, PPFE_raw$Batch)         
+table(PPFE_raw$orig.ident, PPFE_raw$Cohort)         
+
+```
+
+```{r}
+PPFE_raw <- subset(PPFE_raw, Batch == "Batch2")
+
+# Remove due to bad QC (see above)
+PPFE_raw <- subset(PPFE_raw, orig.ident != "CTRL_CTR056")
+```
+
+#=============================================
+
+
+# Data Cleaning
+```{r}
+# Calculate MTs
+PPFE_raw[["percent.mt"]] <- PercentageFeatureSet(PPFE_raw, pattern = "^MT-", assay = "RNA")
+
+# Get a List of all samples 
+PPFE.list <- SplitObject(PPFE_raw, split.by = "orig.ident")
+
+PPFE_raw@meta.data %>%
+  filter(disease.ident == "PPFE") %>%
+  pull(orig.ident) %>%
+  unique()
+
+PPFE_raw@meta.data %>%
+  filter(disease.ident == "CTRL") %>%
+  pull(orig.ident) %>%
+  unique()
+
+# Create Metadata Dataframe
+PPFE_metadata <- PPFE_raw[[]]
+```
+
+#=================================================================
+
+# Assess QC-Metrics for each Sample
+
+## Pipeline-Function
+```{r}
+theProcess <- function(sample.name,min.counts,min.features,max.mt,tag, seurat.data){
+  
+  set.seed(123)
+  
+  # Create directory named after sample.name if it does not exist
+  dir.create(file.path(getwd(), sample.name), showWarnings = FALSE)
+  
+  # Base path for saving files
+  base_save_path <- file.path(getwd(), sample.name)
+  # Plot QC metrics
+  QCViolinPlotter(sample.name=sample.name,min.counts=min.counts,min.features=min.features,max.mt=max.mt,tag=tag, base_save_path=base_save_path)
+  TriplePercentMtPlotter(sample.name=sample.name,min.counts=min.counts,min.features=min.features,max.mt=max.mt,tag=tag, base_save_path=base_save_path)
+  #TriplePercentSplPlotter(sample.name=sample.name,min.counts=min.counts,min.features=min.features,max.mt=max.mt,tag=tag) <- Haben wir keine Informationen drüber bisher
+  
+  # Pull object, apply subset, & dimensional reduction
+  x <- which(sample.name == names(seurat.data))
+  object <- seurat.data[[x]]
+  object <- subset(object, nCount_RNA > min.counts & nFeature_RNA > min.features & percent.mt < max.mt)
+  object <- NormalizeData(object)
+  object <- FindVariableFeatures(object)
+  object <- ScaleData(object) # don't regress on anything for now, see if it matters
+  object <- RunPCA(object, npcs = 50, verbose = F)
+  png(file.path(base_save_path, paste(sample.name,tag, '_elbow.png',sep="")), width = 800, height = 500)
+  print(ElbowPlot(object,ndims = 50)+labs(title = sample.name))
+  dev.off()
+  pdf(file.path(base_save_path, paste(sample.name,'_pcheatmap_1',tag,'.pdf',sep="")), width = 12, height = 16)
+  print(DimHeatmap(object, dims = 1:15, cells = 200, balanced = T))
+  dev.off()
+  pdf(file.path(base_save_path, paste(sample.name,'_pcheatmap_2',tag,'.pdf',sep="")), width = 12, height = 16)
+  print(DimHeatmap(object, dims = 16:30, cells = 200, balanced = T))
+  dev.off()
+  
+  # Cluster, plot, & check QC
+  pcs <- 30
+  object <- FindNeighbors(object, dims = 1:pcs)
+  object <- FindClusters(object, resolution = 0.5)
+  object <- RunUMAP(object, reduction = "pca", dims = 1:pcs)
+  png(file.path(base_save_path, paste(sample.name,'_umap_1',tag,'.png',sep="")), width = 500, height = 500)
+  print(UMAPPlot(object,label = T) + labs(title = sample.name,subtitle = paste("PC's = ",pcs)) + NoLegend() + NoAxes())
+  dev.off()
+  png(file.path(base_save_path, paste(sample.name,'_fp_lin',tag,'.png',sep="")), width = 800, height = 800)
+  print(FeaturePlot(object, c('CDH5','COL1A1','EPCAM','PTPRC'), label = T,repel=T))
+  dev.off()
+  png(file.path(base_save_path, paste(sample.name,'_fp_qc',tag,'.png',sep="")), width = 800, height = 1200)
+  print(FeaturePlot(object, c('percent.mt','nCount_RNA','nFeature_RNA','MKI67','TOP2A'),ncol=2,label = T,repel=T))
+  dev.off()
+  png(file.path(base_save_path, paste(sample.name,'_vln_lin',tag,'.png',sep="")), width = 800, height = 800)
+  print(VlnPlot(object, c('CDH5','COL1A1','EPCAM','PTPRC'),ncol=2,pt.size=0.1))
+  dev.off()
+  png(file.path(base_save_path, paste(sample.name,'_vln_qc',tag,'.png',sep="")), width = 800, height = 800)
+  print(VlnPlot(object, c('percent.mt','nCount_RNA','nFeature_RNA','MKI67','TOP2A'),ncol=2,pt.size=0.1))
+  dev.off()
+  
+  ## Backtrack to original Filtration plots
+  nclusters <- length(levels(object$seurat_clusters))
+  # ViolinPlots broken apart by cluster
+  p <- VlnPlot(object, features = c("nCount_RNA"),pt.size=0.1,log=T) +
+    geom_hline(yintercept=min.counts, linetype='dashed', color='red', size=1) +
+    labs(subtitle = paste("Min.Counts = ",min.counts)) + theme(legend.position = 'none',axis.title.x = element_blank(),plot.subtitle = element_text(color='red'))
+  q <- VlnPlot(object, features = c("nFeature_RNA"),pt.size=0.1,log=T) +
+    geom_hline(yintercept=min.features, linetype='dashed', color='red', size=1) +
+    labs(subtitle = paste("Min.Features = ",min.features)) + theme(legend.position = 'none',axis.title.x = element_blank(),plot.subtitle = element_text(color='red'))
+  r <- VlnPlot(object, features = c("percent.mt"),pt.size=0.1,y.max=(max.mt+0.5)) +
+    geom_hline(yintercept=max.mt, linetype='dashed', color='red', size=1) +
+    labs(subtitle = paste("Max.Mt = ",max.mt)) +
+    theme(legend.position = 'none',axis.title.x = element_blank(),plot.subtitle = element_text(color='red'),plot.caption = element_text(color='red'))
+  png(file.path(base_save_path, paste(sample.name,'_filterback_1',tag,'.png',sep="")),width = 1500,height=500)
+  print(plot_grid(p,q,r,ncol=3))
+  dev.off()
+  
+  # ViolinPlots not broken apart, jitter points colored by cluster
+  p <- VlnPlot(object, features = c("nCount_RNA"),pt.size=0,log=T,group.by='orig.ident',cols=1) +
+    geom_jitter(aes(color = factor(object$seurat_clusters)), size = 0.5) +
+    scale_colour_manual(name="color", values=hue_pal()(nclusters)) +
+    geom_hline(yintercept=min.counts, linetype='dashed', color='red', size=1) +
+    labs(subtitle = paste("Min.Counts = ",min.counts)) + theme(legend.position = 'none',axis.title.x = element_blank(),plot.subtitle = element_text(color='red'))
+  q <- VlnPlot(object, features = c("nFeature_RNA"),pt.size=0,log=T,group.by='orig.ident',cols=1) +
+    geom_jitter(aes(color = factor(object$seurat_clusters)), size = 0.5) +
+    scale_colour_manual(name="color", values=hue_pal()(nclusters)) +
+    geom_hline(yintercept=min.features, linetype='dashed', color='red', size=1) +
+    labs(subtitle = paste("Min.Features = ",min.features)) + theme(legend.position = 'none',axis.title.x = element_blank(),plot.subtitle = element_text(color='red'))
+  r <- VlnPlot(object, features = c("percent.mt"),pt.size=0,group.by='orig.ident',cols=1,y.max=(max.mt+0.5)) +
+    geom_jitter(aes(color = factor(object$seurat_clusters)), size = 0.5) +
+    scale_colour_manual(name="color", values=hue_pal()(nclusters)) +
+    geom_hline(yintercept=max.mt, linetype='dashed', color='red', size=1) +
+    labs(subtitle = paste("Max.Mt = ",max.mt)) +
+    theme(legend.position = 'none',axis.title.x = element_blank(),plot.subtitle = element_text(color='red'))
+  png(file.path(base_save_path, paste(sample.name,'_filterback_2',tag,'.png',sep="")),width = 1500,height=500)
+  print(plot_grid(p,q,r,ncol=3))
+  dev.off()
+  
+  # Scatter Plot colored by cluster
+  list <- subset(PPFE_metadata,orig.ident %in% sample.name)
+  filtered <- subset(list,nCount_RNA > min.counts & nFeature_RNA > min.features & percent.mt < max.mt)
+  
+  png(file.path(base_save_path, paste(sample.name,'_filterback_3',tag,'.png',sep="")),width = 600,height=500)
+  print(
+    ggplot() +
+      geom_point(data=filtered, aes(x=nCount_RNA, y=nFeature_RNA, color=factor(object$seurat_clusters)), size = 0.5) +
+      scale_colour_manual(name="color", values=hue_pal()(nclusters)) +
+      geom_vline(xintercept=min.counts, linetype='dashed', color='red', size=1) +
+      geom_hline(yintercept=min.features, linetype='dashed', color='red', size=1) +
+      labs(title = sample.name) +
+      labs(subtitle = paste("Min.Counts = ",min.counts," / Min.Features = ",min.features," / Max.Mt = ",max.mt)) +
+      theme(plot.title = element_text(size = 24, hjust = 0.5),
+            plot.subtitle = element_text(color='red'),
+            plot.caption = element_text(color='red'),
+            axis.title.x = element_text(size = 20,color='black'),
+            axis.title.y = element_text(size = 20,color='black'),
+            axis.text.x = element_text(size=12,color='black'),
+            axis.text.y = element_text(size = 12,color='black'),
+            axis.line = element_line(size = 1),
+            panel.grid.major = element_blank(),
+            panel.grid.minor = element_blank(),
+            panel.background = element_blank())
+  )
+  dev.off()
+  
+  # Ribosomal Characterization
+  object[['percent.ribo']] <- PercentageFeatureSet(object, pattern = c("RP[SL]\\d+\\w{0,1}\\d*$", 
+                                                                       "Rp[sl]\\d+\\w{0,1}\\d*$", 
+                                                                       "rp[sl]\\d+\\w{0,1}\\d*$")
+                                                   )
+  png(file.path(base_save_path, paste(sample.name,'_fp_ribo',tag,'.png',sep="")), width = 500, height = 500)
+  print(FeaturePlot(object, c('percent.ribo'), label = T))
+  dev.off()
+  png(file.path(base_save_path, paste(sample.name,'_vln_ribo',tag,'.png',sep="")), width = 500, height = 500)
+  print(VlnPlot(object, c('percent.ribo'),pt.size=0.1))
+  dev.off()
+  
+  # Epithelial Characterization
+  png(file.path(base_save_path, paste(sample.name,'_fp_c5',tag,'.png',sep="")), width = 800, height = 800)
+  print(FeaturePlot(object, c('SFTPC','AGER','DEFB4','LYZ2'), label = T, repel = T))
+  dev.off()
+  png(file.path(base_save_path, paste(sample.name,'_fp_epi',tag,'.png',sep="")), width = 800, height = 800)
+  print(FeaturePlot(object, c('KRT5','SFTPC','HOPX','AQP5'), label = T, repel = T))
+  dev.off()
+  
+  ###### Add further Plots outside the original function ######
+  # Titration
+  count.test <- seq(100, 1000, by = 100)
+  for (i in 1:length(count.test)){
+    titrationUMAP(object=object,min.counts=count.test[i],min.features=min.features,max.mt=max.mt, base_save_path=base_save_path, sample.name=sample.name)
+  }
+  feature.test <- seq(100, 1000, by = 100)
+  for (i in 1:length(feature.test)){
+    titrationUMAP(object=object,min.counts=min.counts,min.features=feature.test[i],max.mt=max.mt, base_save_path=base_save_path, sample.name=sample.name)
+  }
+  mt.test <- seq(20, 2, by = -2)
+  for (i in 1:length(mt.test)){
+    titrationUMAP(object=object,min.counts=min.counts,min.features=min.features,max.mt=mt.test[i], base_save_path=base_save_path, sample.name=sample.name)
+  }
+  
+  ###########################################################
+  
+  # Pass output to outside for further exploration
+  #object <<- object # Passes this outside of the function
+}
+```
+
+
+## QC-Violin Plot
+```{r}
+QCViolinPlotter <- function(sample.name,min.counts,min.features,max.mt,tag, base_save_path){
+  x <- which(sample.name == names(PPFE.list))
+  object <- PPFE.list[[x]]
+  filtered <- subset(object,nFeature_RNA > min.features & nCount_RNA > min.counts & percent.mt < max.mt)
+  p <- VlnPlot(object, features = c("nCount_RNA"),pt.size=0.1,log=T) +
+    geom_hline(yintercept=min.counts, linetype='dashed', color='red', size=1) +
+    labs(subtitle = paste("Min.Counts = ",min.counts)) + theme(legend.position = 'none',axis.title.x = element_blank(),plot.subtitle = element_text(color='red'))
+  q <- VlnPlot(object, features = c("nFeature_RNA"),pt.size=0.1,log=T) +
+    geom_hline(yintercept=min.features, linetype='dashed', color='red', size=1) +
+    labs(subtitle = paste("Min.Features = ",min.features)) + theme(legend.position = 'none',axis.title.x = element_blank(),plot.subtitle = element_text(color='red'))
+  r <- VlnPlot(object, features = c("percent.mt"),pt.size=0.1,y.max=50) +
+    geom_hline(yintercept=max.mt, linetype='dashed', color='red', size=1) +
+    labs(subtitle = paste("Max.Mt = ",max.mt)) +
+    labs(caption = paste("Barcodes retained with these filters from starting total: ",ncol(filtered),"/",ncol(object))) +
+    theme(legend.position = 'none',axis.title.x = element_blank(),plot.subtitle = element_text(color='red'),plot.caption = element_text(color='red'))
+  png(file.path(base_save_path, paste(sample.name,'_filterselect_1',tag,'.png',sep="")),width = 1500,height=500)
+  print(plot_grid(p,q,r,ncol=3))
+  dev.off()
+}
+```
+
+## Triple Percent Plot MT
+```{r}
+TriplePercentMtPlotter <- function(sample.name,min.counts,min.features,max.mt,tag, base_save_path=base_save_path){
+  object <- subset(PPFE_metadata,orig.ident %in% sample.name)
+  lowpass <- subset(object,percent.mt < max.mt)
+  highmt <- subset(object,percent.mt > max.mt)
+  filtered <- subset(object,nFeature_RNA > min.features & nCount_RNA > min.counts & percent.mt < max.mt)
+  p <- ggplot() +
+    geom_point(data=highmt, aes(x=nCount_RNA, y=nFeature_RNA), color = 'gray') +
+    geom_point(data=lowpass, aes(x=nCount_RNA, y=nFeature_RNA, color=percent.mt)) +
+    scale_color_viridis(limits = c(0, 50), oob = scales::squish) +
+    geom_vline(xintercept=min.counts, linetype='dashed', color='red', size=1) +
+    geom_hline(yintercept=min.features, linetype='dashed', color='red', size=1) +
+    labs(title = sample.name) +
+    labs(subtitle = paste("Min.Counts = ",min.counts," / Min.Features = ",min.features," / Max.Mt = ",max.mt)) +
+    labs(caption = paste("Barcodes retained with these filters from starting total: ",nrow(filtered),"/",nrow(object))) +
+    theme(plot.title = element_text(size = 24, hjust = 0.5),
+          plot.subtitle = element_text(color='red'),
+          plot.caption = element_text(color='red'),
+          axis.title.x = element_text(size = 20,color='black'),
+          axis.title.y = element_text(size = 20,color='black'),
+          axis.text.x = element_text(size=12,color='black'),
+          axis.text.y = element_text(size = 12,color='black'),
+          axis.line = element_line(size = 1),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.background = element_blank())
+  png(file.path(base_save_path, paste(sample.name,'_filterselect_2',tag,'.png',sep="")),width = 600,height=500)
+  print(p)
+  dev.off()
+}
+```
+
+## Titration UMAP
+```{r}
+titrationUMAP <- function(object,min.counts,min.features,max.mt, base_save_path=base_save_path, sample.name=sample.name){
+  object@meta.data$Passing <- 'NoPass'
+  cells.Pass <- WhichCells(object,expression = nCount_RNA > min.counts & nFeature_RNA > min.features & percent.mt < max.mt)
+  meta.data.pass <- data.frame(Barcode = cells.Pass,Passing = 'Pass')
+  rownames(meta.data.pass) <- cells.Pass
+  if(length(cells.Pass) < ncol(object)){
+    cells.NoPass <- WhichCells(object,cells = cells.Pass,invert = T)
+    meta.data.nopass <- data.frame(Barcode = cells.NoPass,Passing = 'NoPass')
+    rownames(meta.data.nopass) <- cells.NoPass
+  }else{meta.data.nopass <- data.frame()}
+  meta.data <- rbind(meta.data.pass,meta.data.nopass)
+  object <- AddMetaData(object,metadata = meta.data)
+  tag <- paste('min.ct',min.counts,'min.ft',min.features,'max.mt',max.mt,sep='.')
+  png(file.path(base_save_path, paste(sample.name,'_TitrationDimPlot.',tag,'.png',sep="")), width = 500, height = 500)
+  print(DimPlot(object,group.by = 'Passing',cols = c('#0529F4','#F42F05'),shuffle = T)
+        + labs(title = sample.name,subtitle = paste('nCount_RNA >',min.counts,'& nFeature_RNA >',min.features,'& percent.mt <',max.mt)))
+  dev.off()
+}
+```
+
+## Final Cleaning Pipeline-Function
+```{r}
+theProcess_final <- function(sample.name,min.counts,min.features,max.mt,tag, seurat.data){
+  
+  set.seed(123)
+  
+  # Create directory named after sample.name if it does not exist
+  dir.create(file.path(getwd(),paste0("final_",sample.name)), showWarnings = FALSE)
+  
+  # Base path for saving files
+  base_save_path <- file.path(getwd(), paste0("final_",sample.name))
+  # Plot QC metrics
+  QCViolinPlotter(sample.name=sample.name,min.counts=min.counts,min.features=min.features,max.mt=max.mt,tag=tag, base_save_path=base_save_path)
+  TriplePercentMtPlotter(sample.name=sample.name,min.counts=min.counts,min.features=min.features,max.mt=max.mt,tag=tag, base_save_path=base_save_path)
+  #TriplePercentSplPlotter(sample.name=sample.name,min.counts=min.counts,min.features=min.features,max.mt=max.mt,tag=tag) <- Haben wir keine Informationen drüber bisher
+  
+  # Pull object, apply subset, & dimensional reduction
+  x <- which(sample.name == names(seurat.data))
+  object <- seurat.data[[x]]
+  #object <- subset(object, nCount_RNA > min.counts & nFeature_RNA > min.features & percent.mt < max.mt)
+  object <- NormalizeData(object)
+  object <- FindVariableFeatures(object)
+  object <- ScaleData(object) # don't regress on anything for now, see if it matters
+  object <- RunPCA(object, npcs = 50, verbose = F)
+  png(file.path(base_save_path, paste(sample.name,tag, '_elbow.png',sep="")), width = 800, height = 500)
+  print(ElbowPlot(object,ndims = 50)+labs(title = sample.name))
+  dev.off()
+  pdf(file.path(base_save_path, paste(sample.name,'_pcheatmap_1',tag,'.pdf',sep="")), width = 12, height = 16)
+  print(DimHeatmap(object, dims = 1:15, cells = 200, balanced = T))
+  dev.off()
+  pdf(file.path(base_save_path, paste(sample.name,'_pcheatmap_2',tag,'.pdf',sep="")), width = 12, height = 16)
+  print(DimHeatmap(object, dims = 16:30, cells = 200, balanced = T))
+  dev.off()
+  
+  # Cluster, plot, & check QC
+  pcs <- 30
+  object <- FindNeighbors(object, dims = 1:pcs)
+  object <- FindClusters(object, resolution = 0.5)
+  object <- RunUMAP(object, reduction = "pca", dims = 1:pcs)
+  png(file.path(base_save_path, paste(sample.name,'_umap_1',tag,'.png',sep="")), width = 500, height = 500)
+  print(UMAPPlot(object,label = T) + labs(title = sample.name,subtitle = paste("PC's = ",pcs)) + NoLegend() + NoAxes())
+  dev.off()
+  png(file.path(base_save_path, paste(sample.name,'_fp_lin',tag,'.png',sep="")), width = 800, height = 800)
+  print(FeaturePlot(object, c('CDH5','COL1A1','EPCAM','PTPRC'), label = T,repel=T))
+  dev.off()
+  png(file.path(base_save_path, paste(sample.name,'_fp_qc',tag,'.png',sep="")), width = 800, height = 1200)
+  print(FeaturePlot(object, c('percent.mt','nCount_RNA','nFeature_RNA','MKI67','TOP2A'),ncol=2,label = T,repel=T))
+  dev.off()
+  png(file.path(base_save_path, paste(sample.name,'_vln_lin',tag,'.png',sep="")), width = 800, height = 800)
+  print(VlnPlot(object, c('CDH5','COL1A1','EPCAM','PTPRC'),ncol=2,pt.size=0.1))
+  dev.off()
+  png(file.path(base_save_path, paste(sample.name,'_vln_qc',tag,'.png',sep="")), width = 800, height = 800)
+  print(VlnPlot(object, c('percent.mt','nCount_RNA','nFeature_RNA','MKI67','TOP2A'),ncol=2,pt.size=0.1))
+  dev.off()
+  
+  ## Backtrack to original Filtration plots
+  nclusters <- length(levels(object$seurat_clusters))
+  # ViolinPlots broken apart by cluster
+  p <- VlnPlot(object, features = c("nCount_RNA"),pt.size=0.1,log=T) +
+    geom_hline(yintercept=min.counts, linetype='dashed', color='red', size=1) +
+    labs(subtitle = paste("Min.Counts = ",min.counts)) + theme(legend.position = 'none',axis.title.x = element_blank(),plot.subtitle = element_text(color='red'))
+  q <- VlnPlot(object, features = c("nFeature_RNA"),pt.size=0.1,log=T) +
+    geom_hline(yintercept=min.features, linetype='dashed', color='red', size=1) +
+    labs(subtitle = paste("Min.Features = ",min.features)) + theme(legend.position = 'none',axis.title.x = element_blank(),plot.subtitle = element_text(color='red'))
+  r <- VlnPlot(object, features = c("percent.mt"),pt.size=0.1,y.max=(max.mt+0.5)) +
+    geom_hline(yintercept=max.mt, linetype='dashed', color='red', size=1) +
+    labs(subtitle = paste("Max.Mt = ",max.mt)) +
+    theme(legend.position = 'none',axis.title.x = element_blank(),plot.subtitle = element_text(color='red'),plot.caption = element_text(color='red'))
+  png(file.path(base_save_path, paste(sample.name,'_filterback_1',tag,'.png',sep="")),width = 1500,height=500)
+  print(plot_grid(p,q,r,ncol=3))
+  dev.off()
+  
+  # ViolinPlots not broken apart, jitter points colored by cluster
+  p <- VlnPlot(object, features = c("nCount_RNA"),pt.size=0,log=T,group.by='orig.ident',cols=1) +
+    geom_jitter(aes(color = factor(object$seurat_clusters)), size = 0.5) +
+    scale_colour_manual(name="color", values=hue_pal()(nclusters)) +
+    geom_hline(yintercept=min.counts, linetype='dashed', color='red', size=1) +
+    labs(subtitle = paste("Min.Counts = ",min.counts)) + theme(legend.position = 'none',axis.title.x = element_blank(),plot.subtitle = element_text(color='red'))
+  q <- VlnPlot(object, features = c("nFeature_RNA"),pt.size=0,log=T,group.by='orig.ident',cols=1) +
+    geom_jitter(aes(color = factor(object$seurat_clusters)), size = 0.5) +
+    scale_colour_manual(name="color", values=hue_pal()(nclusters)) +
+    geom_hline(yintercept=min.features, linetype='dashed', color='red', size=1) +
+    labs(subtitle = paste("Min.Features = ",min.features)) + theme(legend.position = 'none',axis.title.x = element_blank(),plot.subtitle = element_text(color='red'))
+  r <- VlnPlot(object, features = c("percent.mt"),pt.size=0,group.by='orig.ident',cols=1,y.max=(max.mt+0.5)) +
+    geom_jitter(aes(color = factor(object$seurat_clusters)), size = 0.5) +
+    scale_colour_manual(name="color", values=hue_pal()(nclusters)) +
+    geom_hline(yintercept=max.mt, linetype='dashed', color='red', size=1) +
+    labs(subtitle = paste("Max.Mt = ",max.mt)) +
+    theme(legend.position = 'none',axis.title.x = element_blank(),plot.subtitle = element_text(color='red'))
+  png(file.path(base_save_path, paste(sample.name,'_filterback_2',tag,'.png',sep="")),width = 1500,height=500)
+  print(plot_grid(p,q,r,ncol=3))
+  dev.off()
+  
+  # Scatter Plot colored by cluster
+  list <- subset(PPFE_metadata,orig.ident %in% sample.name)
+  filtered <- list#subset(list,nCount_RNA > min.counts & nFeature_RNA > min.features & percent.mt < max.mt)
+  
+  png(file.path(base_save_path, paste(sample.name,'_filterback_3',tag,'.png',sep="")),width = 600,height=500)
+  print(
+    ggplot() +
+      geom_point(data=filtered, aes(x=nCount_RNA, y=nFeature_RNA, color=factor(object$seurat_clusters)), size = 0.5) +
+      scale_colour_manual(name="color", values=hue_pal()(nclusters)) +
+      geom_vline(xintercept=min.counts, linetype='dashed', color='red', size=1) +
+      geom_hline(yintercept=min.features, linetype='dashed', color='red', size=1) +
+      labs(title = sample.name) +
+      labs(subtitle = paste("Min.Counts = ",min.counts," / Min.Features = ",min.features," / Max.Mt = ",max.mt)) +
+      theme(plot.title = element_text(size = 24, hjust = 0.5),
+            plot.subtitle = element_text(color='red'),
+            plot.caption = element_text(color='red'),
+            axis.title.x = element_text(size = 20,color='black'),
+            axis.title.y = element_text(size = 20,color='black'),
+            axis.text.x = element_text(size=12,color='black'),
+            axis.text.y = element_text(size = 12,color='black'),
+            axis.line = element_line(size = 1),
+            panel.grid.major = element_blank(),
+            panel.grid.minor = element_blank(),
+            panel.background = element_blank())
+  )
+  dev.off()
+  
+  # Ribosomal Characterization
+  object[['percent.ribo']] <- PercentageFeatureSet(object, pattern = c("RP[SL]\\d+\\w{0,1}\\d*$", 
+                                                                       "Rp[sl]\\d+\\w{0,1}\\d*$", 
+                                                                       "rp[sl]\\d+\\w{0,1}\\d*$")
+                                                   )
+  png(file.path(base_save_path, paste(sample.name,'_fp_ribo',tag,'.png',sep="")), width = 500, height = 500)
+  print(FeaturePlot(object, c('percent.ribo'), label = T))
+  dev.off()
+  png(file.path(base_save_path, paste(sample.name,'_vln_ribo',tag,'.png',sep="")), width = 500, height = 500)
+  print(VlnPlot(object, c('percent.ribo'),pt.size=0.1))
+  dev.off()
+  
+  # Epithelial Characterization
+  png(file.path(base_save_path, paste(sample.name,'_fp_c5',tag,'.png',sep="")), width = 800, height = 800)
+  print(FeaturePlot(object, c('SFTPC','AGER','DEFB4','LYZ2'), label = T, repel = T))
+  dev.off()
+  png(file.path(base_save_path, paste(sample.name,'_fp_epi',tag,'.png',sep="")), width = 800, height = 800)
+  print(FeaturePlot(object, c('KRT5','SFTPC','HOPX','AQP5'), label = T, repel = T))
+  dev.off()
+  
+  ###### Add further Plots outside the original function ######
+  # Titration
+  count.test <- seq(100, 1000, by = 100)
+  for (i in 1:length(count.test)){
+    titrationUMAP(object=object,min.counts=count.test[i],min.features=min.features,max.mt=max.mt, base_save_path=base_save_path, sample.name=sample.name)
+  }
+  feature.test <- seq(100, 1000, by = 100)
+  for (i in 1:length(feature.test)){
+    titrationUMAP(object=object,min.counts=min.counts,min.features=feature.test[i],max.mt=max.mt, base_save_path=base_save_path, sample.name=sample.name)
+  }
+  mt.test <- seq(20, 2, by = -2)
+  for (i in 1:length(mt.test)){
+    titrationUMAP(object=object,min.counts=min.counts,min.features=min.features,max.mt=mt.test[i], base_save_path=base_save_path, sample.name=sample.name)
+  }
+  
+  ###########################################################
+
+  # Smooth_Scatter - Features
+  png(file.path(base_save_path, paste(sample.name,'_smooth_cts',tag,'.png',sep="")), width = 800, height = 800)
+  smoothScatter(object$nFeature_RNA, object$percent.mt, 
+                main="scatter plot showing the pre-selection filtering gate") + abline(v=c(min.features), h=max.mt, col="red")
+  dev.off()
+  
+  print(smoothScatter(object$nFeature_RNA, object$percent.mt, 
+                main="scatter plot showing the pre-selection filtering gate") + abline(v=c(min.features), h=max.mt, col="red"))
+  
+  # Smooth_Scatter - Counts
+  png(file.path(base_save_path, paste(sample.name,'_smooth_fts',tag,'.png',sep="")), width = 800, height = 800)
+  
+  print(smoothScatter(object$nCount_RNA, object$percent.mt, 
+                main="scatter plot showing the pre-selection filtering gate") + abline(v=c(min.counts), h=max.mt, col="red"))
+ 
+  dev.off()
+  
+  print(smoothScatter(object$nCount_RNA, object$percent.mt, 
+                main="scatter plot showing the pre-selection filtering gate") + abline(v=c(min.counts), h=max.mt, col="red"))
+
+  # Print final titration UMAP
+  titrationUMAP(object,min.counts,min.features,max.mt, base_save_path=base_save_path, sample.name=sample.name)
+  
+  }
+```
+
+
+## Setup Chunk for params
+```{r}
+# Setup Params
+
+# Low Start
+min.counts <- 100
+min.features <- 100
+max.mt <- 20
+tag <- paste('.min.ct',min.counts,'min.ft',min.features,'max.mt',max.mt,sep='.')
+```
+
+
+### 1. Control Samples
+```{r}
+library(parallel)
+
+# get all the Control orig.idents
+sample.names <- PPFE_raw@meta.data %>%
+  filter(disease.ident == "CTRL") %>%
+  pull(orig.ident) %>%
+  unique() # Example list of samples
+
+
+# Low Start
+min.counts <- 100
+min.features <- 100
+max.mt <- 20
+tag <- paste('.min.ct',min.counts,'min.ft',min.features,'max.mt',max.mt,sep='.')
+
+
+# Apply Function as multicore
+mclapply(sample.names, function(name) {
+  theProcess(sample.name=name, min.counts=min.counts, min.features=min.features, max.mt=max.mt, tag=tag, seurat.data=PPFE.list)
+}, mc.cores = 15) # Adjust mc.cores based on your system's capabilities and the number of samples.
+```
+
+### 2. PPFE-Samples
+```{r}
+library(parallel)
+
+# get all the Control orig.idents
+sample.names <- PPFE_raw@meta.data %>%
+  filter(disease.ident == "PPFE") %>%
+  pull(orig.ident) %>%
+  unique() # Example list of samples
+
+
+# Low Start
+min.counts <- 100
+min.features <- 100
+max.mt <- 20
+tag <- paste('.min.ct',min.counts,'min.ft',min.features,'max.mt',max.mt,sep='.')
+
+
+# Apply Function as multicore
+mclapply(sample.names, function(name) {
+  theProcess(sample.name=name, min.counts=min.counts, min.features=min.features, max.mt=max.mt, tag=tag, seurat.data=PPFE.list)
+}, mc.cores = 22) # Adjust mc.cores based on your system's capabilities and the number of samples.
+```
+
+## PPFE nachgeholt
+```{r}
+# Low Start
+name = "PPFE_PPFE22"
+min.counts <- 100
+min.features <- 100
+max.mt <- 20
+tag <- paste('.min.ct',min.counts,'min.ft',min.features,'max.mt',max.mt,sep='.')
+
+
+# Apply Function as multicore
+theProcess(sample.name=name, min.counts=min.counts, min.features=min.features, max.mt=max.mt, tag=tag, seurat.data=PPFE.list) # Adjust mc.cores based on your system's capabilities and the number of samples.
+```
+# PPFE
+
+### PPFE_PPFE21
+```{r, fig.height=3, fig.width=4}
+# Low Start
+name = "PPFE_PPFE21"
+min.counts <- 500
+min.features <- 400
+max.mt <- 4
+tag <- paste('.min.ct',min.counts,'min.ft',min.features,'max.mt',max.mt,sep='.')
+
+theProcess_final(sample.name=name, min.counts=min.counts, min.features=min.features, max.mt=max.mt, tag=tag, seurat.data=PPFE.list)
+```
+```{r, fig.height=3, fig.width=7}
+# Subset the dataset
+PPFE.list$PPFE_PPFE21 <- subset(PPFE.list$PPFE_PPFE21, subset = nFeature_RNA > 400 &
+                                #nFeature_RNA <  
+                                percent.mt < 4 & 
+                                #nCount_RNA< 
+                                nCount_RNA>500)
+```
+
+### PPFE_PPFE22
+```{r, fig.height=3, fig.width=4}
+# Low Start
+name = "PPFE_PPFE22"
+min.counts <- 200
+min.features <- 150
+max.mt <- 8
+tag <- paste('.min.ct',min.counts,'min.ft',min.features,'max.mt',max.mt,sep='.')
+
+theProcess_final(sample.name=name, min.counts=min.counts, min.features=min.features, max.mt=max.mt, tag=tag, seurat.data=PPFE.list)
+```
+
+```{r, fig.height=3, fig.width=7}
+# Subset the dataset
+PPFE.list$PPFE_PPFE22 <- subset(PPFE.list$PPFE_PPFE22, subset = nFeature_RNA > 150 &
+                                #nFeature_RNA <  
+                                percent.mt < 8 & 
+                                #nCount_RNA< 
+                                nCount_RNA>200)
+```
+
+
+### PPFE_PPFE23
+```{r, fig.height=3, fig.width=4}
+# Low Start
+name = "PPFE_PPFE23"
+min.counts <- 500
+min.features <- 400
+max.mt <- 6
+tag <- paste('.min.ct',min.counts,'min.ft',min.features,'max.mt',max.mt,sep='.')
+
+theProcess_final(sample.name=name, min.counts=min.counts, min.features=min.features, max.mt=max.mt, tag=tag, seurat.data=PPFE.list)
+```
+
+
+
+```{r, fig.height=3, fig.width=7}
+# Subset the dataset
+PPFE.list$PPFE_PPFE23 <- subset(PPFE.list$PPFE_PPFE23, subset = nFeature_RNA > 400 &
+                                #nFeature_RNA <  
+                                percent.mt < 6 & 
+                                #nCount_RNA< 
+                                nCount_RNA>500)
+```
+
+
+### PPFE_PPFE24
+```{r, fig.height=3, fig.width=4}
+# Low Start
+name = "PPFE_PPFE24"
+min.counts <- 500
+min.features <- 400
+max.mt <- 4
+tag <- paste('.min.ct',min.counts,'min.ft',min.features,'max.mt',max.mt,sep='.')
+
+theProcess_final(sample.name=name, min.counts=min.counts, min.features=min.features, max.mt=max.mt, tag=tag, seurat.data=PPFE.list)
+```
+
+
+```{r, fig.height=3, fig.width=7}
+# Subset the dataset
+PPFE.list$PPFE_PPFE24 <- subset(PPFE.list$PPFE_PPFE24, subset = nFeature_RNA > 400 &
+                                #nFeature_RNA <  
+                                percent.mt < 4 & 
+                                #nCount_RNA< 
+                                nCount_RNA>500)
+```
+
+
+### PPFE_PPFE25
+```{r, fig.height=3, fig.width=4}
+# Low Start
+name = "PPFE_PPFE25"
+min.counts <- 500
+min.features <- 400
+max.mt <- 4
+tag <- paste('.min.ct',min.counts,'min.ft',min.features,'max.mt',max.mt,sep='.')
+
+theProcess_final(sample.name=name, min.counts=min.counts, min.features=min.features, max.mt=max.mt, tag=tag, seurat.data=PPFE.list)
+```
+
+
+```{r, fig.height=3, fig.width=7}
+# Subset the dataset
+PPFE.list$PPFE_PPFE25 <- subset(PPFE.list$PPFE_PPFE25, subset = nFeature_RNA > 400 &
+                                #nFeature_RNA <  
+                                percent.mt < 4 & 
+                                #nCount_RNA< 
+                                nCount_RNA>500)
+```
+
+
+### PPFE_PPFE26
+```{r, fig.height=3, fig.width=4}
+# Low Start
+name = "PPFE_PPFE26"
+min.counts <- 500
+min.features <- 400
+max.mt <- 12
+tag <- paste('.min.ct',min.counts,'min.ft',min.features,'max.mt',max.mt,sep='.')
+
+theProcess_final(sample.name=name, min.counts=min.counts, min.features=min.features, max.mt=max.mt, tag=tag, seurat.data=PPFE.list)
+```
+
+```{r, fig.height=3, fig.width=7}
+# Subset the dataset
+PPFE.list$PPFE_PPFE26 <- subset(PPFE.list$PPFE_PPFE26, subset = nFeature_RNA > 400 &
+                                #nFeature_RNA <  
+                                percent.mt < 12 & 
+                                #nCount_RNA< 
+                                nCount_RNA>500)
+```
+
+
+### PPFE_PPFE27 EXCLUDED
+
+### PPFE_PPFE28
+```{r, fig.height=3, fig.width=4}
+# Low Start
+name = "PPFE_PPFE28"
+min.counts <- 500
+min.features <- 400
+max.mt <- 4
+tag <- paste('.min.ct',min.counts,'min.ft',min.features,'max.mt',max.mt,sep='.')
+
+theProcess_final(sample.name=name, min.counts=min.counts, min.features=min.features, max.mt=max.mt, tag=tag, seurat.data=PPFE.list)
+```
+
+
+```{r, fig.height=3, fig.width=7}
+# Subset the dataset
+PPFE.list$PPFE_PPFE28 <- subset(PPFE.list$PPFE_PPFE28, subset = nFeature_RNA > 400 &
+                                #nFeature_RNA <  
+                                percent.mt < 4 & 
+                                #nCount_RNA< 
+                                nCount_RNA>500)
+```
+
+
+### PPFE_PPFE29
+```{r, fig.height=3, fig.width=4}
+# Low Start
+name = "PPFE_PPFE29"
+min.counts <- 500
+min.features <- 400
+max.mt <- 6
+tag <- paste('.min.ct',min.counts,'min.ft',min.features,'max.mt',max.mt,sep='.')
+
+theProcess_final(sample.name=name, min.counts=min.counts, min.features=min.features, max.mt=max.mt, tag=tag, seurat.data=PPFE.list)
+```
+
+
+```{r, fig.height=3, fig.width=7}
+# Subset the dataset
+PPFE.list$PPFE_PPFE29 <- subset(PPFE.list$PPFE_PPFE29, subset = nFeature_RNA > 400 &
+                                #nFeature_RNA <  
+                                percent.mt < 6 & 
+                                #nCount_RNA< 
+                                nCount_RNA>500)
+```
+
+
+### PPFE_PPFE30 EXCLUDED
+
+
+### PPFE_PPFE31
+```{r, fig.height=3, fig.width=4}
+# Low Start
+name = "PPFE_PPFE31"
+min.counts <- 500
+min.features <- 400
+max.mt <- 4
+tag <- paste('.min.ct',min.counts,'min.ft',min.features,'max.mt',max.mt,sep='.')
+
+theProcess_final(sample.name=name, min.counts=min.counts, min.features=min.features, max.mt=max.mt, tag=tag, seurat.data=PPFE.list)
+```
+
+
+```{r, fig.height=3, fig.width=7}
+# Subset the dataset
+PPFE.list$PPFE_PPFE31 <- subset(PPFE.list$PPFE_PPFE31, subset = nFeature_RNA > 400 &
+                                #nFeature_RNA <  
+                                percent.mt < 4 & 
+                                #nCount_RNA< 
+                                nCount_RNA>500)
+```
+
+
+### PPFE_PPFE32
+```{r, fig.height=3, fig.width=4}
+# Low Start
+name = "PPFE_PPFE32"
+min.counts <- 500
+min.features <- 400
+max.mt <- 8
+tag <- paste('.min.ct',min.counts,'min.ft',min.features,'max.mt',max.mt,sep='.')
+
+theProcess_final(sample.name=name, min.counts=min.counts, min.features=min.features, max.mt=max.mt, tag=tag, seurat.data=PPFE.list)
+```
+
+
+```{r, fig.height=3, fig.width=7}
+# Subset the dataset
+PPFE.list$PPFE_PPFE32 <- subset(PPFE.list$PPFE_PPFE32, subset = nFeature_RNA > 400 &
+                                #nFeature_RNA <  
+                                percent.mt < 8 & 
+                                #nCount_RNA< 
+                                nCount_RNA>500)
+```
+
+
+### PPFE_PPFE33
+```{r, fig.height=3, fig.width=4}
+# Low Start
+name = "PPFE_PPFE33"
+min.counts <- 500
+min.features <- 400
+max.mt <- 12
+tag <- paste('.min.ct',min.counts,'min.ft',min.features,'max.mt',max.mt,sep='.')
+
+theProcess_final(sample.name=name, min.counts=min.counts, min.features=min.features, max.mt=max.mt, tag=tag, seurat.data=PPFE.list)
+```
+
+
+```{r, fig.height=3, fig.width=7}
+# Subset the dataset
+PPFE.list$PPFE_PPFE33 <- subset(PPFE.list$PPFE_PPFE33, subset = nFeature_RNA > 400 &
+                                #nFeature_RNA <  
+                                percent.mt < 12 & 
+                                #nCount_RNA< 
+                                nCount_RNA>500)
+```
+
+
+### PPFE_PPFE34
+```{r, fig.height=3, fig.width=4}
+# Low Start
+name = "PPFE_PPFE34"
+min.counts <- 500
+min.features <- 400
+max.mt <- 4
+tag <- paste('.min.ct',min.counts,'min.ft',min.features,'max.mt',max.mt,sep='.')
+
+theProcess_final(sample.name=name, min.counts=min.counts, min.features=min.features, max.mt=max.mt, tag=tag, seurat.data=PPFE.list)
+```
+
+
+```{r, fig.height=3, fig.width=7}
+# Subset the dataset
+PPFE.list$PPFE_PPFE34 <- subset(PPFE.list$PPFE_PPFE34, subset = nFeature_RNA > 400 &
+                                #nFeature_RNA <  
+                                percent.mt < 4 & 
+                                #nCount_RNA< 
+                                nCount_RNA>500)
+```
+
+
+### PPFE_PPFE35
+```{r, fig.height=3, fig.width=4}
+# Low Start
+name = "PPFE_PPFE35"
+min.counts <- 500
+min.features <- 400
+max.mt <- 4
+tag <- paste('.min.ct',min.counts,'min.ft',min.features,'max.mt',max.mt,sep='.')
+
+theProcess_final(sample.name=name, min.counts=min.counts, min.features=min.features, max.mt=max.mt, tag=tag, seurat.data=PPFE.list)
+```
+
+
+```{r, fig.height=3, fig.width=7}
+# Subset the dataset
+PPFE.list$PPFE_PPFE35 <- subset(PPFE.list$PPFE_PPFE35, subset = nFeature_RNA > 400 &
+                                #nFeature_RNA <  
+                                percent.mt < 4 & 
+                                #nCount_RNA< 
+                                nCount_RNA>500)
+```
+
+
+### PPFE_PPFE36
+```{r, fig.height=3, fig.width=4}
+# Low Start
+name = "PPFE_PPFE36"
+min.counts <- 500
+min.features <- 400
+max.mt <- 6
+tag <- paste('.min.ct',min.counts,'min.ft',min.features,'max.mt',max.mt,sep='.')
+
+theProcess_final(sample.name=name, min.counts=min.counts, min.features=min.features, max.mt=max.mt, tag=tag, seurat.data=PPFE.list)
+```
+
+
+```{r, fig.height=3, fig.width=7}
+# Subset the dataset
+PPFE.list$PPFE_PPFE36 <- subset(PPFE.list$PPFE_PPFE36, subset = nFeature_RNA > 400 &
+                                #nFeature_RNA <  
+                                percent.mt < 6 & 
+                                #nCount_RNA< 
+                                nCount_RNA>500)
+```
+
+
+### PPFE_PPFE37
+```{r, fig.height=3, fig.width=4}
+# Low Start
+name = "PPFE_PPFE37"
+min.counts <- 500
+min.features <- 200
+max.mt <- 10
+tag <- paste('.min.ct',min.counts,'min.ft',min.features,'max.mt',max.mt,sep='.')
+
+theProcess_final(sample.name=name, min.counts=min.counts, min.features=min.features, max.mt=max.mt, tag=tag, seurat.data=PPFE.list)
+```
+
+```{r, fig.height=3, fig.width=7}
+# Subset the dataset
+PPFE.list$PPFE_PPFE37 <- subset(PPFE.list$PPFE_PPFE37, subset = nFeature_RNA > 500 &
+                                #nFeature_RNA <  
+                                percent.mt < 10 & 
+                                #nCount_RNA< 
+                                nCount_RNA>200)
+```
+
+
+### PPFE_PPFE38
+```{r, fig.height=3, fig.width=4}
+# Low Start
+name = "PPFE_PPFE38"
+min.counts <- 500
+min.features <- 400
+max.mt <- 6
+tag <- paste('.min.ct',min.counts,'min.ft',min.features,'max.mt',max.mt,sep='.')
+
+theProcess_final(sample.name=name, min.counts=min.counts, min.features=min.features, max.mt=max.mt, tag=tag, seurat.data=PPFE.list)
+```
+
+
+```{r, fig.height=3, fig.width=7}
+# Subset the dataset
+PPFE.list$PPFE_PPFE38 <- subset(PPFE.list$PPFE_PPFE38, subset = nFeature_RNA > 400 &
+                                #nFeature_RNA <  
+                                percent.mt < 6 & 
+                                #nCount_RNA< 
+                                nCount_RNA>500)
+```
+
+
+### PPFE_PPFE39
+```{r, fig.height=3, fig.width=4}
+# Low Start
+name = "PPFE_PPFE39"
+min.counts <- 500
+min.features <- 400
+max.mt <- 6
+tag <- paste('.min.ct',min.counts,'min.ft',min.features,'max.mt',max.mt,sep='.')
+
+theProcess_final(sample.name=name, min.counts=min.counts, min.features=min.features, max.mt=max.mt, tag=tag, seurat.data=PPFE.list)
+```
+
+
+```{r, fig.height=3, fig.width=7}
+# Subset the dataset
+PPFE.list$PPFE_PPFE39 <- subset(PPFE.list$PPFE_PPFE39, subset = nFeature_RNA > 400 &
+                                #nFeature_RNA <  
+                                percent.mt < 6 & 
+                                #nCount_RNA< 
+                                nCount_RNA>500)
+```
+
+
+
+### PPFE_PPFE40
+```{r, fig.height=3, fig.width=4}
+# Low Start
+name = "PPFE_PPFE40"
+min.counts <- 500
+min.features <- 400
+max.mt <- 6
+tag <- paste('.min.ct',min.counts,'min.ft',min.features,'max.mt',max.mt,sep='.')
+
+theProcess_final(sample.name=name, min.counts=min.counts, min.features=min.features, max.mt=max.mt, tag=tag, seurat.data=PPFE.list)
+```
+
+
+```{r, fig.height=3, fig.width=7}
+# Subset the dataset
+PPFE.list$PPFE_PPFE40 <- subset(PPFE.list$PPFE_PPFE40, subset = nFeature_RNA > 400 &
+                                #nFeature_RNA <  
+                                percent.mt < 6 & 
+                                #nCount_RNA< 
+                                nCount_RNA>500)
+```
+
+
+
+### PPFE_PPFE41
+```{r, fig.height=3, fig.width=4}
+# Low Start
+name = "PPFE_PPFE41"
+min.counts <- 500
+min.features <- 400
+max.mt <- 8
+tag <- paste('.min.ct',min.counts,'min.ft',min.features,'max.mt',max.mt,sep='.')
+
+theProcess_final(sample.name=name, min.counts=min.counts, min.features=min.features, max.mt=max.mt, tag=tag, seurat.data=PPFE.list)
+```
+
+
+```{r, fig.height=3, fig.width=7}
+# Subset the dataset
+PPFE.list$PPFE_PPFE41 <- subset(PPFE.list$PPFE_PPFE41, subset = nFeature_RNA > 400 &
+                                #nFeature_RNA <  
+                                percent.mt < 8 & 
+                                #nCount_RNA< 
+                                nCount_RNA>500)
+```
+
+
+### PPFE_PPFE42
+```{r, fig.height=3, fig.width=4}
+# Low Start
+name = "PPFE_PPFE42"
+min.counts <- 500
+min.features <- 400
+max.mt <- 4
+tag <- paste('.min.ct',min.counts,'min.ft',min.features,'max.mt',max.mt,sep='.')
+
+theProcess_final(sample.name=name, min.counts=min.counts, min.features=min.features, max.mt=max.mt, tag=tag, seurat.data=PPFE.list)
+```
+
+
+```{r, fig.height=3, fig.width=7}
+# Subset the dataset
+PPFE.list$PPFE_PPFE42 <- subset(PPFE.list$PPFE_PPFE42, subset = nFeature_RNA > 400 &
+                                #nFeature_RNA <  
+                                percent.mt < 4 & 
+                                #nCount_RNA< 
+                                nCount_RNA>500)
+```
+
+### PPFE_PPFE43
+```{r, fig.height=3, fig.width=4}
+# Low Start
+name = "PPFE_PPFE43"
+min.counts <- 500
+min.features <- 400
+max.mt <- 4
+tag <- paste('.min.ct',min.counts,'min.ft',min.features,'max.mt',max.mt,sep='.')
+
+theProcess_final(sample.name=name, min.counts=min.counts, min.features=min.features, max.mt=max.mt, tag=tag, seurat.data=PPFE.list)
+```
+
+
+```{r, fig.height=3, fig.width=7}
+# Subset the dataset
+PPFE.list$PPFE_PPFE43 <- subset(PPFE.list$PPFE_PPFE43, subset = nFeature_RNA > 400 &
+                                #nFeature_RNA <  
+                                percent.mt < 4 & 
+                                #nCount_RNA< 
+                                nCount_RNA>500)
+```
+
+### PPFE_PPFE44
+```{r, fig.height=3, fig.width=4}
+# Low Start
+name = "PPFE_PPFE44"
+min.counts <- 500
+min.features <- 400
+max.mt <- 8
+tag <- paste('.min.ct',min.counts,'min.ft',min.features,'max.mt',max.mt,sep='.')
+
+theProcess_final(sample.name=name, min.counts=min.counts, min.features=min.features, max.mt=max.mt, tag=tag, seurat.data=PPFE.list)
+```
+
+
+```{r, fig.height=3, fig.width=7}
+# Subset the dataset
+PPFE.list$PPFE_PPFE44 <- subset(PPFE.list$PPFE_PPFE44, subset = nFeature_RNA > 400 &
+                                #nFeature_RNA <  
+                                percent.mt < 8 & 
+                                #nCount_RNA< 
+                                nCount_RNA>500)
+```
+
+# CTRL
+
+###CTRL_CTR056 EXCLUDED
+
+### CTRL_CTRL058
+```{r, fig.height=3, fig.width=4}
+# Low Start
+name = "CTRL_CTR058"
+min.counts <- 300
+min.features <- 200
+max.mt <- 4
+tag <- paste('.min.ct',min.counts,'min.ft',min.features,'max.mt',max.mt,sep='.')
+
+theProcess_final(sample.name=name, min.counts=min.counts, min.features=min.features, max.mt=max.mt, tag=tag, seurat.data=PPFE.list)
+```
+
+
+```{r, fig.height=3, fig.width=7}
+# Subset the dataset
+PPFE.list$CTRL_CTR058 <- subset(PPFE.list$CTRL_CTR058, subset = nFeature_RNA > 300 & 
+                                  #nFeature_RNA < 5000 & 
+                                  percent.mt < 4 & 
+                                  #nCount_RNA<10000 & 
+                                  nCount_RNA>200)
+```
+
+```{r, fig.height=12}
+PPFE_raw[["percent.mt"]] <- PercentageFeatureSet(PPFE_raw, pattern = "^MT-", assay = "RNA")
+
+ggplot(PPFE_raw, aes(x=nCount_RNA, y=nFeature_RNA)) + geom_point(aes(color=percent.mt)) +
+  scale_color_viridis(limits = c(0, 20), oob = scales::squish) +
+  labs(title = 'All Project Samples') +
+  theme(plot.title = element_text(size = 24, hjust = 0.5),
+        axis.title.x = element_text(size = 20,color='black'),
+        axis.title.y = element_text(size = 20,color='black'),
+        axis.text.x = element_text(size=12,color='black'),
+        axis.text.y = element_text(size = 12,color='black'),
+        axis.line = element_line(size = 1),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank())
+```
+
+#====================================
+# Doublet Finding
+```{r}
+for (i in samples) {
+  PPFE.list[[i]] <- RunCellQC(PPFE.list[[i]], assay = "RNA", qc_metrics = c("doublets"))
+  }
+```
+
+```{r}
+# Loop through the list, extract, and merge metadata
+for(i in 1:length(PPFE.list)) {
+  # Extract metadata
+  metadata <- PPFE.list[[i]]@meta.data
+  # Merge with the main metadata data frame
+  merged_metadata <- rbind(merged_metadata, metadata)
+}
+```
+
+#=============================
+
+# Prepare for RPCA Integration
+
+## Normalize + HVF 
+```{r}
+PPFE.list <- lapply(X = PPFE.list, FUN = function(x) {
+    x <- NormalizeData(x, verbose = FALSE)
+    x <- FindVariableFeatures(x, verbose = FALSE, nfeatures = 2000)
+})
+```
+## Scale and PCA
+```{r}
+features <- SelectIntegrationFeatures(object.list = PPFE.list, nfeatures = 2000)
+
+## remove mito genes as integrator
+features <- features[!grepl("MT-", features)]
+PPFE.list <- lapply(X = PPFE.list, FUN = function(x) {
+    x <- ScaleData(x, features = features, vars.to.regress = c("nCount_RNA"), verbose = FALSE)
+    x <- RunPCA(x, features = features, verbose = FALSE)
+})
+```
+
+## Save normlized batch2 data
+```{r}
+saveRDS(PPFE.list, "PPFE_CTRL_batch2_Han_French_norm_scaled.03.10.2024.rds")
+```

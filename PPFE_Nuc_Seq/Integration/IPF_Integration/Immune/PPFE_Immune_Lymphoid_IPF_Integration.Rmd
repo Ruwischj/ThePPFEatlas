@@ -1,0 +1,1101 @@
+---
+title: "PPFE_integrated_b1_b2_epithelium"
+author: "Jannik Ruwisch"
+date: "2024-10-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T,
+                      fig.width = 14,
+                      fig.height = 7,
+                      dev = "png",
+                      cache = F)
+```
+
+```{r}
+library(SCP)
+library(Seurat)
+library(SeuratObject)
+library(dplyr)
+library(tidyverse)
+library(tidyseurat)
+library(ggpubr)
+library(data.table)
+library(magrittr)
+```
+
+# Load_Dataset
+```{r}
+PPFE_Imm._int_clean2 <- readRDS("./PPFE_Immune_all_run2_19_06_2024.rds") # Post two iterations of cleaning
+```
+
+# Lymphoid-Cells Cleaning
+```{r}
+PPFE_Lymphatic <- subset(PPFE_Imm._int_clean2, integrated_snn_res.2 != 0 &
+                         integrated_snn_res.2 != 26 &
+                                   integrated_snn_res.2 != 23 &
+                                   integrated_snn_res.2 != 18 &
+                                   integrated_snn_res.2 != 30 &
+                                   integrated_snn_res.2 != 34 &
+                                   integrated_snn_res.2 != 6 &
+                                   integrated_snn_res.2 != 27 &
+                                   integrated_snn_res.2 != 21 &
+                                   integrated_snn_res.2 != 25 &
+                                   integrated_snn_res.2 != 38 &
+                                   integrated_snn_res.2 != 33 &
+                                   integrated_snn_res.2 != 24 & # Neutros
+                         integrated_snn_res.2 != 37 & # pDC 
+                         integrated_snn_res.2 != 28 & # Cycling 
+                         integrated_snn_res.2 != 8)  # Mast 
+                       
+```
+
+# C1) - Lymphoids - Run 1
+```{r}
+# Set the default assay to "RNA"
+DefaultAssay(PPFE_Lymphatic) <- "RNA"
+
+# Create Subject List for integration
+PPFE_Lymphatic.list <- SplitObject(PPFE_Lymphatic, split.by = "orig.ident")
+```
+
+```{r}
+table(PPFE_Lymphatic$orig.ident)
+```
+
+```{r}
+PPFE_Lymphatic.list <- lapply(X = PPFE_Lymphatic.list, FUN = function(x) {
+    x <- NormalizeData(x, verbose = FALSE)
+    x <- FindVariableFeatures(x, verbose = FALSE, nfeatures = 2000)
+})
+
+features <- SelectIntegrationFeatures(object.list = PPFE_Lymphatic.list)
+
+## remove mito genes as integrator
+features <- features[-grep("MT-", features)]
+
+PPFE_Lymphatic.list <- lapply(X = PPFE_Lymphatic.list, FUN = function(x) {
+    x <- ScaleData(x, features = features, vars.to.regress = c("nCount_RNA"), verbose = FALSE)
+    x <- RunPCA(x, features = features, verbose = FALSE, npcs = 50) 
+})
+
+# Find Integration anchors
+anchors <- FindIntegrationAnchors(object.list = PPFE_Lymphatic.list, reduction = "rpca", dims = 1:50)
+```
+
+### RPCA integration
+```{r}
+PPFE_lympahtic_int <-IntegrateData(anchorset = anchors, k.weight = 30)
+```
+
+### Reclustering
+```{r}
+PPFE_lympahtic_int <- ScaleData(PPFE_lympahtic_int, verbose = FALSE, vars.to.regress="percent.mt")
+PPFE_lympahtic_int <- RunPCA(PPFE_lympahtic_int, verbose = FALSE, npcs = 100)
+PPFE_lympahtic_int <- RunUMAP(PPFE_lympahtic_int, dims = 1:100)
+PPFE_lympahtic_int <- FindNeighbors(PPFE_lympahtic_int, reduction = "pca", dims = 1:100)
+PPFE_lympahtic_int <- FindClusters(PPFE_lympahtic_int, resolution = 2)
+```
+
+### UMAP Resolutions
+```{r, fig.width=10, fig.height=8}
+# Specify the number of PCs per heatmap
+pcs_per_heatmap <- 9
+
+# Loop through dimensions in groups of 9
+for (start_dim in seq(1, 100, pcs_per_heatmap)) {
+  end_dim <- min(start_dim + pcs_per_heatmap - 1, 100)
+  
+  # Subset dimensions for the current heatmap
+  dims_subset <- start_dim:end_dim
+  
+  # Create a PCHeatmap for the current group of dimensions
+  PCHeatmap(PPFE_lympahtic_int, cells = 200, balanced = TRUE, dims = dims_subset)
+  
+  # Add a newline between groups
+  cat("\n")
+}
+
+```
+
+### QC
+```{r}
+CellDimPlot(PPFE_lympahtic_int, group.by = c("Celltype_ID_Coarse", "integrated_snn_res.2"), reduction = "ReUMAP_100", combine = T, label = T, label_insitu = T)
+CellDimPlot(PPFE_lympahtic_int, group.by = c("integrated_snn_res.2", "orig.ident"), reduction = "ReUMAP_100", combine = F, label_insitu = T, label = T)
+FeatureDimPlot(PPFE_lympahtic_int, features = c("nCount_RNA", "nFeature_RNA", "percent.mt"))
+CellDimPlot(PPFE_lympahtic_int, group.by = c("Celltype_ID_Coarse", "integrated_snn_res.2"), reduction = "ReUMAP_100", combine = T, label = T, label_insitu = T)
+```
+
+
+```{r}
+PPFE_lympahtic_int <- RunDEtest(srt = PPFE_lympahtic_int, group_by = "integrated_snn_res.2", fc.threshold = 2, 
+                                only.pos = T, assay = "RNA")
+```
+
+```{r}
+PPFE_lympahtic_int.list_marker <- PPFE_lympahtic_int@tools$DEtest_integrated_snn_res.2$AllMarkers_wilcox
+PPFE_lympahtic_int.list_marker
+```
+
+```{r}
+PPFE_lympahtic_int.list_marker <- PPFE_lympahtic_int.list_marker[with(PPFE_lympahtic_int.list_marker, avg_log2FC > 0.3 & p_val_adj < 0.05), ] 
+
+PPFE_lympahtic_int.list_marker <- PPFE_lympahtic_int.list_marker %>%
+  group_by(group1) %>%
+  slice_max(n = 100, order_by = avg_log2FC)
+writexl::write_xlsx(PPFE_lympahtic_int.list_marker, "PPFE_DEGsLymphatic_cleaned_round_1_top100_SNN_2_neu.xlsx")
+PPFE_lympahtic_int.list_marker
+```
+
+#==========================================================
+
+# C2) - Lymphoids - Run 2
+```{r}
+PPFE_lympahtic_int_clean <- subset(PPFE_lympahtic_int, 
+                             integrated_snn_res.2 != 26 &
+                                      integrated_snn_res.2 != 12 &
+                                   integrated_snn_res.2 != 38 &
+                                   integrated_snn_res.2 != 37 &
+                                   integrated_snn_res.2 != 36 &
+                                   integrated_snn_res.2 != 35 &
+                                   integrated_snn_res.2 != 29)   
+                       
+
+CellDimPlot(PPFE_lympahtic_int_clean, group.by = "integrated_snn_res.2", reduction =  "ReUMAP_100", label = T, label_insitu = T)
+```
+
+```{r}
+# Set the default assay to "RNA"
+DefaultAssay(PPFE_lympahtic_int_clean) <- "RNA"
+
+# Create Subject List for integration
+PPFE_lymphatic.list <- SplitObject(PPFE_lympahtic_int_clean, split.by = "orig.ident")
+```
+
+
+```{r}
+PPFE_lymphatic.list <- lapply(X = PPFE_lymphatic.list, FUN = function(x) {
+    x <- NormalizeData(x, verbose = FALSE)
+    x <- FindVariableFeatures(x, verbose = FALSE, nfeatures = 2000)
+})
+
+features <- SelectIntegrationFeatures(object.list = PPFE_lymphatic.list)
+
+## remove mito genes as integrator
+features <- features[-grep("MT-", features)]
+
+PPFE_lymphatic.list <- lapply(X = PPFE_lymphatic.list, FUN = function(x) {
+    x <- ScaleData(x, features = features, vars.to.regress = c("nCount_RNA"), verbose = FALSE)
+    x <- RunPCA(x, features = features, verbose = FALSE, npcs = 50) 
+})
+
+# Find Integration anchors
+anchors <- FindIntegrationAnchors(object.list = PPFE_lymphatic.list, reduction = "rpca", dims = 1:50) 
+```
+
+### RPCA integration
+```{r}
+PPFE_lymphatic_int2 <-IntegrateData(anchorset = anchors, k.weight = 30)
+```
+
+### Reclustering
+```{r}
+PPFE_lymphatic_int2 <- ScaleData(PPFE_lymphatic_int2, verbose = FALSE, vars.to.regress="percent.mt")
+PPFE_lymphatic_int2 <- RunPCA(PPFE_lymphatic_int2, verbose = FALSE, npcs = 100)
+PPFE_lymphatic_int2 <- RunUMAP(PPFE_lymphatic_int2, dims = 1:100)
+PPFE_lymphatic_int2 <- FindNeighbors(PPFE_lymphatic_int2, reduction = "pca", dims = 1:100)
+PPFE_lymphatic_int2 <- FindClusters(PPFE_lymphatic_int2, resolution = 2)
+```
+
+### QC
+```{r}
+CellDimPlot(PPFE_lymphatic_int2, group.by = c("Celltype_ID_Coarse", "integrated_snn_res.2"), reduction = "ReUMAP_100", combine = T, label = T, label_insitu = T)
+CellDimPlot(PPFE_lymphatic_int2, group.by = c("integrated_snn_res.2", "orig.ident"), reduction = "ReUMAP_100", combine = F, label_insitu = T, label = T)
+FeatureDimPlot(PPFE_lymphatic_int2, features = c("nCount_RNA", "nFeature_RNA", "percent.mt"))
+
+CellDimPlot(PPFE_lymphatic_int2, group.by = c("Celltype_ID_Coarse", "integrated_snn_res.2"), reduction = "ReUMAP_100", combine = T, label = T, label_insitu = T)
+Seurat::DimPlot(PPFE_lymphatic_int2, group.by = c("disease.ident", "integrated_snn_res.2"), combine = T, label = T, shuffle = T)
+
+CellDimPlot(PPFE_lymphatic_int2, group.by = c("integrated_snn_res.2", "orig.ident"), reduction = "ReUMAP_100", combine = F, label_insitu = T, label = T)
+FeatureDimPlot(PPFE_lymphatic_int2, features = c("nCount_RNA", "nFeature_RNA", "percent.mt", "PTPRC"), nrow = 2, reduction = "ReUMAP_100", assay = "RNA")
+```
+
+### DEGs
+```{r}
+PPFE_lymphatic_int2 <- RunDEtest(srt = PPFE_lymphatic_int2, group_by = "integrated_snn_res.2", fc.threshold = 1.5, 
+                                 only.pos = T, assay = "RNA")
+```
+```{r}
+PPFE_lymphatic.list_marker <- PPFE_lymphatic_int2@tools$DEtest_integrated_snn_res.2$AllMarkers_wilcox
+PPFE_lymphatic.list_marker
+```
+```{r}
+PPFE_lymphatic.list_marker <- PPFE_lymphatic.list_marker[with(PPFE_lymphatic.list_marker, avg_log2FC > 0.3 & p_val_adj < 0.05), ] # Filtering all > 0.3 for FOR Dixit Jonas aus Sci Adv Paper
+
+PPFE_lymphatic.list_marker <- PPFE_lymphatic.list_marker %>%
+  group_by(group1) %>%
+  slice_max(n = 100, order_by = avg_log2FC)
+writexl::write_xlsx(PPFE_lymphatic.list_marker, "PPFE_DEGs_Lymphocytes_cleaned_round_2_top100_SNN_2_neu.xlsx")
+PPFE_lymphatic.list_marker
+```
+
+#==========================================================
+
+# C3.) - Lymphoids - Run 3
+```{r}
+PPFE_lymphatic_int2_clean <- subset(PPFE_lymphatic_int2, integrated_snn_res.2 != 30 &
+                         integrated_snn_res.2 != 31 &
+                                   integrated_snn_res.2 != 32 &
+                                   integrated_snn_res.2 != 33 &
+                                   integrated_snn_res.2 != 34 &
+                                   integrated_snn_res.2 != 35 &
+                                   integrated_snn_res.2 != 36 &
+                                   integrated_snn_res.2 != 37 &
+                                   integrated_snn_res.2 != 38 &
+                                   integrated_snn_res.2 != 39 ) 
+
+CellDimPlot(PPFE_lymphatic_int2_clean, group.by = "integrated_snn_res.2", label = T, label_insitu = T)
+```
+
+```{r}
+# Set the default assay to "RNA"
+DefaultAssay(PPFE_lymphatic_int2_clean) <- "RNA"
+
+# Create Subject List for integration
+PPFE_lymph.list <- SplitObject(PPFE_lymphatic_int2_clean, split.by = "orig.ident")
+
+# Get smallest sample
+table(PPFE_lymphatic_int2_clean$orig.ident) %>% min()
+```
+
+```{r}
+PPFE_lymph.list <- lapply(X = PPFE_lymph.list, FUN = function(x) {
+    x <- NormalizeData(x, verbose = FALSE)
+    x <- FindVariableFeatures(x, verbose = FALSE, nfeatures = 2000)
+})
+
+features <- SelectIntegrationFeatures(object.list = PPFE_lymph.list)
+
+## remove mito genes as integrator
+features <- features[-grep("MT-", features)]
+
+PPFE_lymph.list <- lapply(X = PPFE_lymph.list, FUN = function(x) {
+    x <- ScaleData(x, features = features, vars.to.regress = c("nCount_RNA"), verbose = FALSE)
+    x <- RunPCA(x, features = features, verbose = FALSE, npcs = 50) 
+})
+
+# Find Integration anchors
+anchors <- FindIntegrationAnchors(object.list = PPFE_lymph.list, reduction = "rpca", dims = 1:50#, k.filter = 90
+                                  ) #dims = 1:30, k.filter = 90
+```
+
+### RPCA integration
+```{r}
+PPFE_lymphocytes_int <-IntegrateData(anchorset = anchors, k.weight = 30)
+```
+
+### Reclustering
+```{r}
+PPFE_lymphocytes_int <- ScaleData(PPFE_lymphocytes_int, verbose = FALSE, vars.to.regress="percent.mt")
+PPFE_lymphocytes_int <- RunPCA(PPFE_lymphocytes_int, verbose = FALSE, npcs = 100)
+PPFE_lymphocytes_int <- RunUMAP(PPFE_lymphocytes_int, dims = 1:100)
+PPFE_lymphocytes_int <- FindNeighbors(PPFE_lymphocytes_int, reduction = "pca", dims = 1:100)
+PPFE_lymphocytes_int <- FindClusters(PPFE_lymphocytes_int, resolution = 2)
+```
+
+### UMAP Resolutions
+```{r, fig.width=10, fig.height=8}
+# Specify the number of PCs per heatmap
+pcs_per_heatmap <- 9
+
+# Loop through dimensions in groups of 9
+for (start_dim in seq(1, 100, pcs_per_heatmap)) {
+  end_dim <- min(start_dim + pcs_per_heatmap - 1, 100)
+  
+  # Subset dimensions for the current heatmap
+  dims_subset <- start_dim:end_dim
+  
+  # Create a PCHeatmap for the current group of dimensions
+  PCHeatmap(PPFE_lymphocytes_int, cells = 200, balanced = TRUE, dims = dims_subset)
+  
+  # Add a newline between groups
+  cat("\n")
+}
+
+```
+
+```{r, fig.width=14}
+PPFE_lymphocytes_int <- RunUMAP(object = PPFE_lymphocytes_int, dims = 1:100, reduction = "pca", reduction.name = "ReUMAP_100", reduction.key = "ReUMAP_100")
+PPFE_lymphocytes_int <- RunUMAP(object = PPFE_lymphocytes_int, dims = 1:75, reduction = "pca", reduction.name = "ReUMAP_75", reduction.key = "ReUMAP_75")
+PPFE_lymphocytes_int <- RunUMAP(object = PPFE_lymphocytes_int, dims = 1:60, reduction = "pca", reduction.name = "ReUMAP_60", reduction.key = "ReUMAP_60")
+PPFE_lymphocytes_int <- RunUMAP(object = PPFE_lymphocytes_int, dims = 1:50, reduction = "pca", reduction.name = "ReUMAP_50", reduction.key = "ReUMAP_50")
+PPFE_lymphocytes_int <- RunUMAP(object = PPFE_lymphocytes_int, dims = 1:30, reduction = "pca", reduction.name = "ReUMAP_30", reduction.key = "ReUMAP_30")
+PPFE_lymphocytes_int <- RunUMAP(object = PPFE_lymphocytes_int, dims = 1:29, reduction = "pca", reduction.name = "ReUMAP_29", reduction.key = "ReUMAP_29")
+PPFE_lymphocytes_int <- RunUMAP(object = PPFE_lymphocytes_int, dims = 1:28, reduction = "pca", reduction.name = "ReUMAP_28", reduction.key = "ReUMAP_28")
+PPFE_lymphocytes_int <- RunUMAP(object = PPFE_lymphocytes_int, dims = 1:25, reduction = "pca", reduction.name = "ReUMAP_25", reduction.key = "ReUMAP_25")
+PPFE_lymphocytes_int <- RunUMAP(object = PPFE_lymphocytes_int, dims = 1:20, reduction = "pca", reduction.name = "ReUMAP_20", reduction.key = "ReUMAP_20")
+PPFE_lymphocytes_int <- RunUMAP(object = PPFE_lymphocytes_int, dims = 1:15, reduction = "pca", reduction.name = "ReUMAP_15", reduction.key = "ReUMAP_15")
+PPFE_lymphocytes_int <- RunUMAP(object = PPFE_lymphocytes_int, dims = 1:11, reduction = "pca", reduction.name = "ReUMAP_11", reduction.key = "ReUMAP_11")
+PPFE_lymphocytes_int <- RunUMAP(object = PPFE_lymphocytes_int, dims = 1:12, reduction = "pca", reduction.name = "ReUMAP_12", reduction.key = "ReUMAP_12")
+PPFE_lymphocytes_int <- RunUMAP(object = PPFE_lymphocytes_int, dims = 1:8, reduction = "pca", reduction.name = "ReUMAP_08", reduction.key = "ReUMAP_08")
+PPFE_lymphocytes_int <- RunUMAP(object = PPFE_lymphocytes_int, dims = 1:10, reduction = "pca", reduction.name = "ReUMAP_10", reduction.key = "ReUMAP_10")
+PPFE_lymphocytes_int <- RunUMAP(object = PPFE_lymphocytes_int, dims = 1:7, reduction = "pca", reduction.name = "ReUMAP_07", reduction.key = "ReUMAP_07")
+PPFE_lymphocytes_int <- RunUMAP(object = PPFE_lymphocytes_int, dims = 1:5, reduction = "pca", reduction.name = "ReUMAP_05", reduction.key = "ReUMAP_05")
+```
+
+```{r}
+# Create an empty list to store the plots
+plot_list <- list()
+
+# Loop over each group value
+for (group_value in groups) {
+  # Create the CellDimPlot for each reduction level
+  plot <- ggarrange(
+    plotlist = list(
+      CellDimPlot(PPFE_lymphocytes_int, group.by = group_value, reduction = "ReUMAP_100", combine = TRUE)+
+        CellDimPlot(PPFE_lymphocytes_int, group.by = group_value, reduction = "ReUMAP_75", combine = TRUE),
+      CellDimPlot(PPFE_lymphocytes_int, group.by = group_value, reduction = "ReUMAP_50", combine = TRUE)+
+        CellDimPlot(PPFE_lymphocytes_int, group.by = group_value, reduction = "ReUMAP_30", combine = TRUE)
+    ),
+    nrow = 2
+  )
+  print(plot)
+  # Add the plot to the list
+  #plot_list[[group_value]] <- plot
+}
+
+
+```
+
+### QC
+```{r}
+CellDimPlot(PPFE_lymphocytes_int, group.by = c("Celltype_ID_Coarse", "integrated_snn_res.2"), reduction = "ReUMAP_29", combine = T, label = T, label_insitu = T)
+CellDimPlot(PPFE_lymphocytes_int, group.by = c("integrated_snn_res.2", "orig.ident"), reduction = "ReUMAP_29", combine = F, label_insitu = T, label = T)
+FeatureDimPlot(PPFE_lymphocytes_int, features = c("nCount_RNA", "nFeature_RNA", "percent.mt"))
+
+CellDimPlot(PPFE_lymphocytes_int, group.by = c("Celltype_ID_Coarse", "integrated_snn_res.2"), reduction = "ReUMAP_29", combine = T, label = T, label_insitu = T)
+Seurat::DimPlot(PPFE_lymphocytes_int, group.by = c("disease.ident", "integrated_snn_res.2"), reduction = "ReUMAP_29", combine = T, label = T, shuffle = T)
+
+CellDimPlot(PPFE_lymphocytes_int, group.by = c("integrated_snn_res.2", "orig.ident"), reduction = "ReUMAP_29", combine = F, label_insitu = T, label = T)
+```
+
+
+### DEGs
+```{r}
+PPFE_lymphocytes_int <- RunDEtest(srt = PPFE_lymphocytes_int, group_by = "integrated_snn_res.2", fc.threshold = 1.5, only.pos = T, assay = "RNA")
+```
+```{r}
+PPFE_lymph.list_marker <- PPFE_lymphocytes_int@tools$DEtest_integrated_snn_res.2$AllMarkers_wilcox
+PPFE_lymph.list_marker
+```
+```{r}
+PPFE_lymph.list_marker <- PPFE_lymph.list_marker[with(PPFE_lymph.list_marker, avg_log2FC > 0.3 & p_val_adj < 0.05), ] 
+
+PPFE_lymph.list_marker <- PPFE_lymph.list_marker %>%
+  group_by(group1) %>%
+  slice_max(n = 100, order_by = avg_log2FC)
+writexl::write_xlsx(PPFE_lymph.list_marker, "PPFE_DEGs_Lymph_cleaned_round_final_top100_SNN_2_NEU.xlsx")
+PPFE_lymph.list_marker
+```
+
+
+```{r}
+PPFE_lymphocytes_int <- SCP::RenameClusters(PPFE_lymphocytes_int, group.by = "integrated_snn_res.2", 
+                                            nameslist = c("CD8+_tissue_res_TC", #0
+                                               "CD4+_TC", #1 # unklar
+                                               "CD4+_naive_TC", #2
+                                               "B_cells_follicular", # 3
+                                               "CD4+_follicular_TC", #4  # unklar
+                                               "CD8+_tissue_res_TC", # 5 
+                                               "Plasma_cells", # 6 
+                                               "CD4+_naive_TC", #  7 
+                                               "B_cells_follicular", # 8 
+                                               "CD8+_effector_TC", #9 
+                                               "Treg", #10
+                                               "TH17_effector_TC", # 11 
+                                               "Plasma_cells", #12 
+                                               "CD16+_NK_cells", # 13 
+                                               "Plasma_cells", # 14 
+                                               "Treg", #  15 
+                                               "CD4+_follicular_TC", #16 
+                                               "B_cells_follicular",  # 17 
+                                               "Gamma_delta_TC", # 18 
+                                               "CD8+_tissue_res_TC", # 19 
+                                               "B_cells_naive", # 20
+                                               "CD16-_NK_cells", # 21 
+                                               "B_cells_transitional", # 22 
+                                               "JUNK", # 23 
+                                               "B_cells_memory", #24 
+                                               "ILC3",# 25
+                                               "B_cells_follicular", # 26 
+                                               "JUNK", # 27 
+                                               "JUNK", # 28 # fraglich
+                                               "JUNK", #29 
+                                               "CD8+_tissue_res_TC",# 30 
+                                               "CD4+_TC", #31
+                                             "CD8+_tissue_res_TC", #32
+                                             "Treg", #33
+                                             "JUNK", #34
+                                             "JUNK", #35
+                                             "JUNK" #36
+                                             ),  
+                                             name = "Celltype_ID") 
+```
+
+```{r}
+PPFE_lymphocytes_int <- SCP::RenameClusters(PPFE_lymphocytes_int, group.by = "integrated_snn_res.2", 
+                                            nameslist = c("CD8+_TC", #0
+                                               "CD4+_TC", #1 # unklar
+                                               "CD4+_TC", #2
+                                               "B_cells", # 3
+                                               "CD4+_TC", #4  # unklar
+                                               "CD8+_TC", # 5 
+                                               "Plasma_cells", # 6 
+                                               "CD4+_TC", #  7 
+                                               "B_cells", # 8 
+                                               "CD8+_TC", #9 
+                                               "Treg", #10
+                                               "TH17_effector_TC", # 11 
+                                               "Plasma_cells", #12 
+                                               "NK_cells", # 13 
+                                               "Plasma_cells", # 14 
+                                               "Treg", #  15 
+                                               "CD4+_TC", #16 
+                                               "B_cells",  # 17 
+                                               "Gamme_delta_TC", # 18 
+                                               "CD4+_TC", # 19 
+                                               "B_cells", # 20
+                                               "NK_cells", # 21 
+                                               "B_cells", # 22 
+                                               "JUNK", # 23 
+                                               "B_cells", #24 
+                                               "ILC3",# 25
+                                               "B_cells", # 26 
+                                               "JUNK", # 27 
+                                               "JUNK", # 28 # fraglich
+                                               "JUNK", #29 
+                                               "CD8+_TC",# 30 
+                                               "CD4+_TC", #31
+                                             "CD8+_TC", #32
+                                             "Treg", #33
+                                             "JUNK", #34
+                                             "JUNK", #35
+                                             "JUNK" #36
+                                             ), 
+                                             name = "Celltype_Coarse") 
+```
+
+
+
+#============
+# C4.) - Lymphoids - Run 4 - RCUG - Server
+```{r}
+# remove Junk
+PPFE_lym_4_clean <- subset(PPFE_lymphocytes_int, Celltype_ID != "JUNK")
+PPFE_lym_4_clean <- subset(PPFE_lym_4_clean, integrated_snn_res.2 != 35)
+PPFE_lym_4_clean <- FindNeighbors(PPFE_lym_4_clean, reduction = "pca", dims = 1:100)
+PPFE_lym_4_clean <- FindClusters(PPFE_lym_4_clean, resolution = c(0.2, 0.4, 0.6, 0.8, 1, 1.2, 1.4, 1.6, 1.8, 2))
+PPFE_lym_5 <- subset(PPFE_lym_4_clean, integrated_snn_res.2 != 30 &
+                       integrated_snn_res.2 != 32 &
+                       integrated_snn_res.2 != 36 &
+                       integrated_snn_res.2 != 38 &
+                       integrated_snn_res.2 != 39 &
+                       integrated_snn_res.2 != 37 &
+                       integrated_snn_res.2 != 31)
+```
+
+### Reclustering
+```{r}
+PPFE_lym_5 <- RunPCA(PPFE_lym_5, verbose = FALSE, npcs = 100)
+PPFE_lym_5 <- RunUMAP(PPFE_lym_5, dims = 1:100)
+PPFE_lym_5 <- FindNeighbors(PPFE_lym_5, reduction = "pca", dims = 1:29)
+PPFE_lym_5 <- FindClusters(PPFE_lym_5, resolution = c(1, 1.8))
+```
+
+```{r, fig.width=14}
+PPFE_lym_5 <- RunUMAP(object = PPFE_lym_5, dims = 1:100, reduction = "pca", reduction.name = "ReUMAP_100", reduction.key = "ReUMAP_100")
+PPFE_lym_5 <- RunUMAP(object = PPFE_lym_5, dims = 1:75, reduction = "pca", reduction.name = "ReUMAP_75", reduction.key = "ReUMAP_75")
+PPFE_lym_5 <- RunUMAP(object = PPFE_lym_5, dims = 1:60, reduction = "pca", reduction.name = "ReUMAP_60", reduction.key = "ReUMAP_60")
+PPFE_lym_5 <- RunUMAP(object = PPFE_lym_5, dims = 1:35, reduction = "pca", reduction.name = "ReUMAP_35", reduction.key = "ReUMAP_35")
+PPFE_lym_5 <- RunUMAP(object = PPFE_lym_5, dims = 1:40, reduction = "pca", reduction.name = "ReUMAP_40", reduction.key = "ReUMAP_40")
+PPFE_lym_5 <- RunUMAP(object = PPFE_lym_5, dims = 1:29, reduction = "pca", reduction.name = "ReUMAP_29", reduction.key = "ReUMAP_29")
+PPFE_lym_5 <- RunUMAP(object = PPFE_lym_5, dims = 1:28, reduction = "pca", reduction.name = "ReUMAP_28", reduction.key = "ReUMAP_28")
+PPFE_lym_5 <- RunUMAP(object = PPFE_lym_5, dims = 1:27, reduction = "pca", reduction.name = "ReUMAP_27", reduction.key = "ReUMAP_27")
+PPFE_lym_5 <- RunUMAP(object = PPFE_lym_5, dims = 1:26, reduction = "pca", reduction.name = "ReUMAP_26", reduction.key = "ReUMAP_26")
+PPFE_lym_5 <- RunUMAP(object = PPFE_lym_5, dims = 1:25, reduction = "pca", reduction.name = "ReUMAP_25", reduction.key = "ReUMAP_25")
+PPFE_lym_5 <- RunUMAP(object = PPFE_lym_5, dims = 1:20, reduction = "pca", reduction.name = "ReUMAP_20", reduction.key = "ReUMAP_20")
+PPFE_lym_5 <- RunUMAP(object = PPFE_lym_5, dims = 1:30, reduction = "pca", reduction.name = "ReUMAP_30", reduction.key = "ReUMAP_30")
+PPFE_lym_5 <- RunUMAP(object = PPFE_lym_5, dims = 1:20, reduction = "pca", reduction.name = "ReUMAP_20", reduction.key = "ReUMAP_20")
+PPFE_lym_5 <- RunUMAP(object = PPFE_lym_5, dims = 1:15, reduction = "pca", reduction.name = "ReUMAP_15", reduction.key = "ReUMAP_15")
+PPFE_lym_5 <- RunUMAP(object = PPFE_lym_5, dims = 1:11, reduction = "pca", reduction.name = "ReUMAP_11", reduction.key = "ReUMAP_11")
+PPFE_lym_5 <- RunUMAP(object = PPFE_lym_5, dims = 1:12, reduction = "pca", reduction.name = "ReUMAP_12", reduction.key = "ReUMAP_12")
+PPFE_lym_5 <- RunUMAP(object = PPFE_lym_5, dims = 1:8, reduction = "pca", reduction.name = "ReUMAP_08", reduction.key = "ReUMAP_08")
+PPFE_lym_5 <- RunUMAP(object = PPFE_lym_5, dims = 1:10, reduction = "pca", reduction.name = "ReUMAP_10", reduction.key = "ReUMAP_10")
+PPFE_lym_5 <- RunUMAP(object = PPFE_lym_5, dims = 1:7, reduction = "pca", reduction.name = "ReUMAP_07", reduction.key = "ReUMAP_07")
+PPFE_lym_5 <- RunUMAP(object = PPFE_lym_5, dims = 1:5, reduction = "pca", reduction.name = "ReUMAP_05", reduction.key = "ReUMAP_05")
+```
+
+### QC
+```{r}
+CellDimPlot(PPFE_lym_5, group.by = c("Celltype_ID", "integrated_snn_res.2"), reduction = "ReUMAP_29", combine = T, label = T, label_insitu = T, raster = F, label_repel = T)
+```
+
+### DEGs
+```{r}
+PPFE_lymphocytes_int <- PPFE_lym_5
+rm(PPFE_lym_5)
+Idents(PPFE_lymphocytes_int) <- "integrated_snn_res.1.8"
+DEGs_Imm <- FindAllMarkers(PPFE_lymphocytes_int, group.by = "integrated_snn_res.1.8", fc.threshold = 2, only.pos = T, assay = "RNA")
+DEGs_Imm <- DEGs_Imm[with(DEGs_Imm, avg_log2FC > 0.3 & p_val_adj < 0.05), ] 
+
+DEGs_Imm <- DEGs_Imm %>%
+  group_by(cluster) %>%
+  slice_max(n = 100, order_by = avg_log2FC)
+writexl::write_xlsx(DEGs_Imm, "DEGs_Lymphos_top100_SNN_1.8_PPFE_RUN6.xlsx")
+```
+
+### Rename Clusters
+
+```{r}
+PPFE_lymphocytes_int <- SCP::RenameClusters(PPFE_lymphocytes_int, group.by = "integrated_snn_res.1.8", nameslist = c("CD4+_TC_naive", #0
+                                                                                                 "CD8+_TC", #1 
+                                                                                                  "BC", #10
+                                                                                                 "PC", # 11 
+                                                                                                 "PC", #12 
+                                                                                                 "CD8+_TC", # 13 
+                                                                                                 "PC", # 14 
+                                                                                                 "BC", #  15 
+                                                                                                 "CD8+_TC", #16 
+                                                                                                 "Tregs",  # 17 
+                                                                                                 "BC_naive", # 18 
+                                                                                                 "CD16+_NK", # 19
+                                                                                                 "BC", #2
+                                                                                                  "CD16+_NK", # 20
+                                                                                                 "gamma_delta_TC", # 21 
+                                                                                                 "Junk", # 22 
+                                                                                                 "CD4+_TC", # 23 
+                                                                                                 "CD16-NK", #24 
+                                                                                                 "CD8+_TC",# 25
+                                                                                                 "PC", # 26 
+                                                                                                 "ILC3", # 27 
+                                                                                                 "BC_memory", # 28 
+                                                                                                 "Junk", #29  AEC2 overlap !   
+                                                                                                 "CD8+_TC", # 3
+                                                                                                  "CD4+_TC", #4 
+                                                                                                  "Junk", # 5 
+                                                                                                  "CD4+_TC_naive", # 6 
+                                                                                                  "CD4+_TH17", #  7 
+                                                                                                  "CD4+_TC", # 8 
+                                                                                                  "Tregs" #9 
+                                                                                                                     
+                                                                                                                   ),  
+                                             name = "Celltype_ID_fine") 
+```
+
+```{r}
+PPFE_lymphocytes_int <- SCP::RenameClusters(PPFE_lymphocytes_int, group.by = "integrated_snn_res.1.8", nameslist = c("CD4+_TC", #0
+                                                                                                 "CD8+_TC", #1 # unklar
+                                                                                                  "BC", #10
+                                                                                                 "PC", # 11 
+                                                                                                 "PC", #12 
+                                                                                                 "CD8+_TC", # 13 
+                                                                                                 "PC", # 14 
+                                                                                                 "BC", #  15 
+                                                                                                 "CD8+_TC", #16 
+                                                                                                 "Tregs",  # 17 
+                                                                                                 "BC", # 18 
+                                                                                                 "NK", # 19
+                                                                                                 "BC", #2
+                                                                                                  "NK", # 20
+                                                                                                 "gamma_delta_TC", # 21 
+                                                                                                 "Junk", # 22 
+                                                                                                 "CD4+_TC", # 23 
+                                                                                                 "NK", #24 
+                                                                                                 "CD8+_TC",# 25
+                                                                                                 "PC", # 26 
+                                                                                                 "ILC3", # 27 
+                                                                                                 "BC", # 28  
+                                                                                                 "Junk", #29 AEC2 overlap   
+                                                                                                 "CD8+_TC", # 3
+                                                                                                  "CD4+_TC", #4 
+                                                                                                  "Junk", # 5 
+                                                                                                  "CD4+_TC", # 6 
+                                                                                                  "CD4+_TC", #  7 
+                                                                                                  "CD4+_TC", # 8 
+                                                                                                  "Tregs" #9 
+                                                                                                                     
+                                                                                                                   ), 
+                                             name = "Celltype_ID_coarse") 
+```
+
+### Cleaning
+```{r}
+# remove Junk
+PPFE_lymphocytes_int_clean <- subset(PPFE_lymphocytes_int, Celltype_ID_fine != "Junk")
+
+# Drop metadata levels
+PPFE_lymphocytes_int_clean@meta.data$Celltype_ID_fine <- droplevels(PPFE_lymphocytes_int_clean@meta.data$Celltype_ID_fine)
+PPFE_lymphocytes_int_clean@meta.data$Celltype_ID_coarse <- droplevels(PPFE_lymphocytes_int_clean@meta.data$Celltype_ID_coarse)
+```
+
+
+#==================================================
+
+# D.) Integrate with IPF
+
+### Load IPF data
+```{r}
+IPF_raw <- load("./IPF_snRNAseq_Data_Lymphoid.Robj") # GSE286182
+IPF_raw <- UpdateSeuratObject(immune.obj)
+rm(immune.obj)
+Version(IPF_raw)
+IPF_clean <- subset(IPF_raw, disease.ident == "IPF")
+rm(IPF_raw)
+# Adjust orig.ident
+IPF_clean$orig.ident <- factor(IPF_clean$subject.ident)
+IPF_clean@meta.data$orig.ident %>% droplevels()
+IPF_clean <- IPF_clean %>%
+  mutate(orig.ident = paste0("IPFnuc", "_", orig.ident))
+IPF_clean$orig.ident %>% unique()
+# Adjust disease ident
+IPF_clean$disease.ident %>% unique()
+table(IPF_clean$orig.ident, IPF_clean$disease.ident)
+```
+
+### Load PPFE data
+```{r}
+# PPFE object already in the working environment
+CellDimPlot(IPF_clean, group.by = "renamedFinal", raster = F, label = T, label_insitu = T)
+CellDimPlot(IPF_clean, group.by = "orig.ident", raster = F, label = F, label_insitu = F, legend.position = "none")
+CellDimPlot(IPF_clean, group.by = "disease.ident", raster = F, label = F, label_insitu = F)
+```
+
+## Adjust the gene annotation among datasets
+```{r}
+###########
+# translate human gene to mouse and vice versa
+library(biomaRt)
+# GRCh38.p12 (this is what i mapped against) is Ensemble97 (July 2019)
+listEnsemblArchives()
+# http://jul2019.archive.ensembl.org
+# listDatasets(useMart("ensembl", host="http://jul2019.archive.ensembl.org"))
+
+ensembl <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl")
+
+# get all possible genetypes for trannslation among databases
+allfilters <- filterOptions("biotype",ensembl)
+
+# human_mart_IPF_optA
+ensembl_103 <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", host = "https://feb2021.archive.ensembl.org")
+ensembl_genes_103 <- getBM(attributes = c('ensembl_gene_id', 'hgnc_symbol', 'external_gene_name', 'gene_biotype'),
+                         filters = 'biotype', 
+                         values = allfilters,
+                         mart = ensembl_103)
+
+# PPFE 10X Version
+ensembl_98 <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", host = "https://sep2019.archive.ensembl.org")
+ensembl_genes_98 <- getBM(attributes = c('ensembl_gene_id', 'hgnc_symbol', 'external_gene_name', 'gene_biotype'),
+                         filters = 'biotype', 
+                         values = allfilters,
+                         mart = ensembl_98)
+
+# Check on DIfferences among ensembl versions
+match_genes <- function(ipf_genes, ensembl_genes) {
+  # irect matching
+  common_genes <- ipf_genes[ipf_genes %in% ensem$external_gene_name]
+  missing_genes <- ipf_genes[!ipf_genes %in% ensembl_genes$external_gene_name]
+  
+  # Correct "-" to "_" and check again
+  corrected_genes <- gsub("-", "_", missing_genes)
+  common_genes_corrected <- corrected_genes[corrected_genes %in% ensembl_genes$external_gene_name]
+  missing_genes_after_correction <- corrected_genes[!corrected_genes %in% ensembl_genes$external_gene_name]
+  
+  # Strip suffixes and check again
+  stripped_genes <- sub("\\..*", "", missing_genes_after_correction)
+  common_genes_stripped <- stripped_genes[stripped_genes %in% ensembl_genes$external_gene_name]
+  final_missing_genes <- stripped_genes[!stripped_genes %in% ensembl_genes$external_gene_name]
+  
+  # Compute intermediate sets
+  common_before_correction <- setdiff(missing_genes, missing_genes_after_correction)
+  common_before_stripping <- setdiff(missing_genes_after_correction, final_missing_genes)
+  
+  # Combine results
+  all_common_genes <- unique(c(common_genes, common_genes_corrected, common_genes_stripped))
+  
+  # Summary
+  list(
+    common = all_common_genes,
+    final_missing = final_missing_genes,
+    common_before_correction = common_before_correction,
+    common_before_stripping = common_before_stripping,
+    bindestr_genes = common_genes_corrected,
+    strip_genes = common_genes_stripped,
+    orig_missing = missing_genes
+  )
+}
+
+IPF_genes_raw <- rownames(IPF_clean) 
+
+# Apply the function for Ensembl 103
+result_103 <- match_genes(IPF_genes_raw, ensembl_genes_103)
+```
+
+## Relabel IPF
+```{r}
+IPF4PPFEint <- IPF_clean
+DefaultAssay(IPF4PPFEint) <- "RNA"
+
+# Extract current gene names
+current_gene_names <- rownames(IPF4PPFEint)
+
+
+########## adjust the gene labels
+# List of specific genes to process
+genes_to_correct__ <- result_103$common_before_correction
+
+# Strip the suffix only from the specific genes
+corrected_gene_names <- ifelse(current_gene_names %in% genes_to_correct__, 
+                               gsub("-", "_", current_gene_names), 
+                               current_gene_names)
+# List of specific genes to process
+genes_to_strip <- result_103$common_before_stripping
+
+# Strip the suffix only from the specific genes
+corrected_gene_names <- ifelse(corrected_gene_names %in% genes_to_strip, 
+                               sub("\\..*", "", corrected_gene_names), 
+                               corrected_gene_names)
+
+as.data.frame(corrected_gene_names) %>% view()      
+#######################
+
+
+# Merge to create a mapping table
+gene_mapping <- merge(ensembl_genes_98, ensembl_genes_103, by = "ensembl_gene_id", suffixes = c("_98", "_103"))
+gene_mapping
+
+# Map old gene names to new ones
+new_gene_names <- gene_mapping$external_gene_name_98[match(corrected_gene_names, gene_mapping$external_gene_name_103)]
+as.data.frame(new_gene_names) %>% view()
+
+# Convert the feature names in the PPFE object
+convertRownames <- function(seu_object) {
+  new_rownames <- new_gene_names
+  rownames(seu_object@assays$RNA@counts) <- new_rownames
+  rownames(seu_object@assays$RNA@data) <- new_rownames
+  features_keep <- rownames(seu_object)[!is.na(rownames(seu_object))]
+  obj_new <- subset(seu_object, features = features_keep)
+  rownames(obj_new@assays$RNA@meta.features) <- rownames(obj_new)
+  return(obj_new)
+}
+
+# Convert gene names in srt obj
+IPF4PPFEint <- convertRownames(IPF4PPFEint)
+
+# Check Intersection of genes
+common_genes <- intersect(rownames(PPFE_lymphocytes_int_clean), rownames(IPF4PPFEint))
+
+# Reduce Object to common genes
+IPF4PPFEint <- DietSeurat(IPF4PPFEint, assays = "RNA",features = common_genes, dimreducs = c("pca", "umap"))
+
+# Save
+saveRDS(IPF4PPFEint, "Mes_IPF4PPFEint_GRCH38_v98features_PPFEoverlapgenes.rds")
+```
+
+## Final Gene Check
+```{r}
+length(rownames(PPFE_Epi_int_final))
+length(rownames(IPF4PPFEint))
+
+common_genes <- intersect(rownames(PPFE_Epi_int_final), rownames(IPF4PPFEint))
+length(common_genes)
+
+# Find distinct genes (present in one but not both datasets)
+distinct_genes <- setdiff(rownames(PPFE_Epi_int_final), common_genes)
+
+# View the distinct genes
+distinct_genes
+```
+
+## Prepare PPFE
+```{r}
+PPFE4IPFint <- DietSeurat(PPFE_lymphocytes_int_clean, assays = "RNA",features = common_genes, dimreducs = c("pca", "umap"))
+```
+
+
+## Integration
+```{r}
+PPFE4IPFint$Project <- "PPFE"
+IPF4PPFEint$Project <- "IPF"
+
+# Create Subject List for integration
+PPFE_lympho.list <- SplitObject(PPFE4IPFint, split.by = "orig.ident")
+IPF_lympho.list <- SplitObject(IPF4PPFEint, split.by = "orig.ident")
+```
+
+```{r}
+# merge the lists
+lympho.list <- c(PPFE_lympho.list, IPF_lympho.list)
+rm(PPFE_lympho.list)
+rm(IPF_lympho.list)
+```
+
+
+```{r}
+lympho.list <- lapply(X = lympho.list, FUN = function(x) {
+    x <- NormalizeData(x, verbose = FALSE)
+    x <- FindVariableFeatures(x, verbose = FALSE, nfeatures = 2000)
+}) 
+```
+
+
+```{r}
+features <- SelectIntegrationFeatures(object.list = lympho.list)
+
+## remove mito genes as integrator
+features <- features[-grep("MT-", features)]
+```
+
+```{r}
+lympho.list <- lapply(X = lympho.list, FUN = function(x) {
+    x <- ScaleData(x, features = features, vars.to.regress = c("nCount_RNA"), verbose = FALSE)
+    x <- RunPCA(x, features = features, verbose = FALSE, npcs = 50) # 50 Dims did not work out
+})
+```
+
+```{r}
+# Find Integration anchors
+anchors <- FindIntegrationAnchors(object.list = endo.list, 
+                                  reduction = "rpca",
+                                  reference = c(1:58)) # PPFE-CTRL as Reference Dataset
+```
+
+```{r}
+test_final <- IntegrateData(anchorset = anchors, k.weight = 30)
+```
+
+#=================
+
+# E.) Downstream
+```{r}
+test_final <- test_final %>%
+  mutate(percent.mt.n = case_when(Project == "IPF" ~ percMito,
+                                Project == "PPFE" ~ percent.mt)
+         )
+
+```
+
+```{r,fig.width=20}
+VlnPlot(test_final, features = "percent.mt.n", group.by = "orig.ident", raster = F)
+```
+
+```{r}
+test_final <- ScaleData(test_final, verbose = FALSE, vars.to.regress="percent.mt.n")
+test_final <- RunPCA(test_final, verbose = FALSE, npcs = 50)
+test_final <- RunUMAP(test_final, dims = 1:50)
+test_final <- FindNeighbors(test_final, reduction = "pca", dims = 1:50)
+test_final <- FindClusters(test_final, resolution = c(1,2))
+```
+
+
+```{r, fig.width=13, fig.height=18}
+# Specify the number of PCs per heatmap
+pcs_per_heatmap <- 9
+
+# Loop through dimensions in groups of 9
+for (start_dim in seq(1, 50, pcs_per_heatmap)) {
+  end_dim <- min(start_dim + pcs_per_heatmap - 1, 50)
+  
+  # Subset dimensions for the current heatmap
+  dims_subset <- start_dim:end_dim
+  
+  # Create a PCHeatmap for the current group of dimensions
+  PCHeatmap(test_final, cells = 200, balanced = TRUE, dims = dims_subset)
+  
+  # Add a newline between groups
+  cat("\n")
+}
+
+```
+
+
+```{r, fig.width=14}
+test_final <- RunUMAP(object = test_final, dims = 1:50, reduction = "pca", reduction.name = "ReUMAP_50", reduction.key = "ReUMAP_50")
+test_final <- RunUMAP(object = test_final, dims = 1:30, reduction = "pca", reduction.name = "ReUMAP_30", reduction.key = "ReUMAP_30")
+test_final <- RunUMAP(object = test_final, dims = 1:20, reduction = "pca", reduction.name = "ReUMAP_20", reduction.key = "ReUMAP_20")
+test_final <- RunUMAP(object = test_final, dims = 1:15, reduction = "pca", reduction.name = "ReUMAP_15", reduction.key = "ReUMAP_15")
+test_final <- RunUMAP(object = test_final, dims = 1:11, reduction = "pca", reduction.name = "ReUMAP_11", reduction.key = "ReUMAP_11")
+test_final <- RunUMAP(object = test_final, dims = 1:12, reduction = "pca", reduction.name = "ReUMAP_12", reduction.key = "ReUMAP_12")
+test_final <- RunUMAP(object = test_final, dims = 1:8, reduction = "pca", reduction.name = "ReUMAP_08", reduction.key = "ReUMAP_08")
+test_final <- RunUMAP(object = test_final, dims = 1:9, reduction = "pca", reduction.name = "ReUMAP_09", reduction.key = "ReUMAP_09")
+test_final <- RunUMAP(object = test_final, dims = 1:10, reduction = "pca", reduction.name = "ReUMAP_10", reduction.key = "ReUMAP_10")
+test_final <- RunUMAP(object = test_final, dims = 1:7, reduction = "pca", reduction.name = "ReUMAP_07", reduction.key = "ReUMAP_07")
+test_final <- RunUMAP(object = test_final, dims = 1:5, reduction = "pca", reduction.name = "ReUMAP_05", reduction.key = "ReUMAP_05")
+```
+
+## DEGs
+
+### Resolution 2
+```{r}
+Idents(test_final) <- "integrated_snn_res.2"
+Epi_Degs_Final_res1 <- FindAllMarkers(object = test_final, assay = "RNA", logfc.threshold = 1.5, only.pos = T)
+```
+```{r}
+Epi_Degs_Final_res1 <- Epi_Degs_Final_res1[with(Epi_Degs_Final_res1, avg_log2FC > 0.3 & p_val_adj < 0.05), ]
+
+Epi_Degs_Final_res1 <- Epi_Degs_Final_res1 %>%
+  group_by(cluster) %>%
+  slice_max(n = 100, order_by = avg_log2FC)
+writexl::write_xlsx(Epi_Degs_Final_res1, "PPFE_IPF_DEGs_Lym_Cleaned_res2_final.xlsx")
+Epi_Degs_Final_res1
+```
+
+### Resolution 1
+```{r}
+test_final$integrated_snn_res.1 %>% unique()
+Idents(test_final) <- "integrated_snn_res.1"
+Lymph_Degs_Final <- FindAllMarkers(object = test_final, assay = "RNA", logfc.threshold = 1.5, only.pos = T)
+```
+
+```{r}
+Lymph_Degs_Final <- Lymph_Degs_Final %>%
+  group_by(cluster) %>%
+  slice_max(n = 100, order_by = avg_log2FC)
+writexl::write_xlsx(Lymph_Degs_Final, "PPFE_IPF_DEGs_LYMPH_Cleaned_res1_final.xlsx")
+Lymph_Degs_Final
+```
+
+
+### Rename Clusters
+```{r}
+test_final <- SCP::RenameClusters(test_final, group.by = "integrated_snn_res.1", nameslist = c("CD4+_TC", #0
+                                                                                               "CD8+_TC", #1 GZMK !
+                                                                                               "NK_Cells", #10
+                                                                                               "B_Cells", #11
+                                                                                               "Plasma_Cells", #12
+                                                                                               "CD4+_TC", #13 # 
+                                                                                               "CD4+_TC", #14
+                                                                                               "Junk", #15
+                                                                                               "NK_Cells", #16 # Junk ?S
+                                                                                               "B_Cells", #17
+                                                                                               "gamma_delta_TC", #18
+                                                                                               "CD4+_TC", #19
+                                                                                               "Junk", #2 no DEGs ! 
+                                                                                               "NK_Cells", #20
+                                                                                               "NK_Cells", #21
+                                                                                               "ILC3", #22
+                                                                                                "NK_Cells", #23
+                                                                                                "B_Cells", #24
+                                                                                                 "B_Cells", #25
+                                                                                                 "Plasma_Cells", #26
+                                                                                                 "CD4+_TC", #27
+                                                                                                "Treg", #28
+                                                                                                "NK_Cells", #29
+                                                                                                "Treg", # 3
+                                                                                                 "NK_Cells", # 30
+                                                                                                 "NK_Cells", # 31
+                                                                                                "CD4+_TC", # 32
+                                                                                                "NK_Cells", # 33
+                                                                                                 "B_Cells", # 34
+                                                                                                 "CD8+_TC", # 35
+                                                                                                 "CD4+_TC", # 4
+                                                                                                "B_Cells", # 5 
+                                                                                                 "CD8+_TC", # 6 
+                                                                                                 "CD4+_TC", #  7 
+                                                                                                 "Plasma_Cells", # 8 
+                                                                                                 "Junk" #9 
+                                                                                                               ),
+                                          name = "Celltype_ID_coarse") 
+
+
+
+```
+```{r}
+test_final <- SCP::RenameClusters(test_final, group.by = "integrated_snn_res.1", nameslist = c("CD4+_TC_naive", #0
+                                                                                               "CD8+_TC_effector_memory", #1 # 
+                                                                                               "NK_Cells_CD16+", #10
+                                                                                               "B_Cells_memory", #11
+                                                                                               "Plasma_Cells", #12
+                                                                                               "CD4+_TC_TH17", #13 # 
+                                                                                               "CD4+_TC_TH1", #14
+                                                                                               "Junk", #15
+                                                                                               "NK_Cells_CD16+", #16 Junk ?
+                                                                                               "B_Cells_naive", #17
+                                                                                               "gamma_delta_TC", #18
+                                                                                               "CD4+_TC_Cytotoxic", #19
+                                                                                               "Junk", #2 no DEGs ! 
+                                                                                               "NK_Cells_CD16-", #20
+                                                                                               "NK_Cells_CD16+", #21
+                                                                                               "ILC3", #22
+                                                                                               "NK_Cells_CD16+", #23
+                                                                                               "B_Cells_memory", #24
+                                                                                               "B_Cells_memory", #25
+                                                                                               "Plasma_Cells", #26
+                                                                                               "CD4+_TC_naive", #27
+                                                                                               "Treg", #28
+                                                                                               "NK_Cells_CD16+", #29
+                                                                                               "Treg", # 3
+                                                                                               "NK_Cells_CD16+", # 30
+                                                                                               "NK_Cells_CD16+", # 31
+                                                                                               "CD4+_TC_naive", # 32
+                                                                                               "NK_Cells_CD16+", # 33
+                                                                                               "B_Cells_memory", # 34
+                                                                                               "CD8+_TC_effector_memory", # 35
+                                                                                               "CD4+_TC_effector_memory",
+                                                                                               "B_Cells_memory", # 5 
+                                                                                               "CD8+_TC_resident_memory", # 6 # 
+                                                                                               "CD4+_TC_effector_memory", #  7 
+                                                                                               "Plasma_Cells", # 8 
+                                                                                               "Junk" #9 
+                                                                                                               ),
+                                          name = "Celltype_ID_fine") 
+
+
+
+```
+
+### Cleaning
+```{r}
+# remove Junk
+test_final_clean <- subset(test_final, Celltype_ID_coarse != "Junk")
+
+# Drop metadata levels
+test_final_clean@meta.data$Celltype_ID_coarse <- droplevels(test_final_clean@meta.data$Celltype_ID_coarse)
+test_final_clean@meta.data$Celltype_ID_fine <- droplevels(test_final_clean@meta.data$Celltype_ID_fine)
+```
+
+#=================
+
+# Adjust metadata col names
+```{r}
+# Unify Cohort label
+test_final_clean <- test_final_clean %>%
+  mutate(Cohort = case_when(Project == "PPFE" ~ Cohort,
+                            Project == "IPF" ~ "Belgium"),
+         orig.ident_final = case_when(Project == "PPFE" ~ orig.ident,
+                                Project == "IPF" ~ paste0("IPFnuc_",substr(orig.ident, start = 1, stop = 10)))
+         
+       )
+# Overwrite old orig.ident
+test_final_clean$orig.ident <- test_final_clean$orig.ident_final
+
+# introduce disease_cohort
+test_final_clean <- test_final_clean %>%
+  mutate(disease_cohort = paste(disease.ident, Cohort, sep = "_"),
+         disease.ident_cohort = case_when(Project == "PPFE" ~ paste0(test_final_clean$Cohort, "__", test_final_clean$disease.ident,
+                                           Project == "IPF" ~ "Belgium__IPF")
+                                          )
+         )
+
+# Move main celltype label to Celltype Col
+test_final_clean$Celltype <- test_final_clean$Celltype_ID_fine
+
+# "ReUMAP_18" = Reduction to use
+```
+
+
+# Save
+```{r}
+#Save final clean dataset
+saveRDS(test_final_clean, file.path(folder, "PPFE_Lymphoid_Lineage.rds"))
+```

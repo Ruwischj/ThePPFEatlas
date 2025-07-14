@@ -1,0 +1,1084 @@
+---
+title: "Merging_ALL_PPFE"
+author: "Jannik Ruwisch"
+date: "2024-12-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T,
+                      fig.width = 14,
+                      fig.height = 7,
+                      #dpi = 1200,
+                      dev = "png",
+                      cache = F,
+                      fig.path= "C:/Users/Jannik/OneDrive/PNE_MHH/AG_Prasse_OneDrive/PPFE/PPFE_Nuc_Seq/Batch_integration/ppfe_epithelium/")
+```
+
+```{r}
+# INfos
+## Dataset was created with 10X Flex Tech >> Lower UMIs, Features and Counts than Chromium ! 
+```
+
+```{r}
+library(SCP)
+library(Seurat)
+library(SeuratObject)
+#library(renv)
+#library(SCP)
+library(dplyr)
+library(tidyverse)
+library(tidyseurat)
+library(ggpubr)
+```
+```{r}
+# Color Palettes"
+dis_pal <- palette_scp(x = test$disease.ident, palcolor = c("royalblue", "red3", "#ffd59b"))
+cohort_pal_heat <- palette_scp(x = test$Cohort, palcolor = c("grey88", "grey58", "grey18"))
+cohort_pal <-  c("royalblue", "red1", "darkred", "#ffd59b")
+lin_pal <- palette_scp(x = test$Lineage,palcolor = c( "#cc79a7", "#009e73", "#5654e9", "#d55e00"  , "#e69f00"))
+subject_pal <-  palette_scp(palette = "Set1", n = length(test$orig.ident %>% unique()), matched = F) 
+
+ 
+```
+
+
+# 1. Read in all datasets
+```{r}
+ppfe_epi <- readRDS("C:/Users/Jannik/OneDrive/PNE_MHH/AG_Prasse_OneDrive/PPFE/PPFE_Nuc_Seq/Batch_integration/ppfe_epithelium/PPFE_b1b2_IPF_int_RPCA_25112024.rds")
+ppfe_mes <- readRDS("C:/Users/Jannik/OneDrive/PNE_MHH/AG_Prasse_OneDrive/PPFE/PPFE_Nuc_Seq/Batch_integration/ppfe_mesenchyme/PPFE_b1b2_IPF_Mes_int_RPCA_28112024.rds")
+ppfe_endo <- readRDS("C:/Users/Jannik/OneDrive/PNE_MHH/AG_Prasse_OneDrive/PPFE/PPFE_Nuc_Seq/Batch_integration/ppfe_endothelium/Re_PPFE_mes_b1b2_IPF_int_RPCA_12122024.rds")
+ppfe_lymph <- readRDS("C:/Users/Jannik/OneDrive/PNE_MHH/AG_Prasse_OneDrive/PPFE/PPFE_Nuc_Seq/Batch_integration/ppfe_immune/Immune_IPF/PPFE_lym_b1b2_PPFE_int_RPCA_15122024.rds")
+ppfe_myeloid <- readRDS("C:/Users/Jannik/OneDrive/PNE_MHH/AG_Prasse_OneDrive/PPFE/PPFE_Nuc_Seq/Batch_integration/ppfe_immune/Immune_IPF/PPFE_myeloid_b1b2_PPFE_int_RPCA_16122024.rds")
+```
+
+```{r, fig.width=35}
+CellDimPlot(ppfe_epi, group.by = "Celltype_ID_final_coarse", reduction = "ReUMAP_20")  |
+  CellDimPlot(ppfe_mes, group.by = "Celltype_ID_final_coarse", reduction = "ReUMAPone")  |
+  CellDimPlot(ppfe_endo, group.by = "Celltype_ID_coarse", reduction = "ReUMAP_20")  | 
+  CellDimPlot(ppfe_myeloid, group.by = "Celltype_ID_fine", reduction = "ReUMAP_10")  | 
+  CellDimPlot(ppfe_lymph, group.by = "Celltype_ID_fine", reduction = "ReUMAP_18" ) 
+
+CellDimPlot(ppfe_epi, group.by = "Celltype_Coarse", reduction = "ReUMAP_20")  |
+  CellDimPlot(ppfe_mes, group.by = "Celltype_Coarse", reduction = "ReUMAPone")  |
+  CellDimPlot(ppfe_endo, group.by = "Celltype_Coarse", reduction = "ReUMAP_20")  | 
+  CellDimPlot(ppfe_myeloid, group.by = "Celltype_Coarse", reduction = "ReUMAP_10")  | 
+  CellDimPlot(ppfe_lymph, group.by = "Celltype_Coarse", reduction = "ReUMAP_18" ) 
+  
+```
+## 1A) CHeck the ident Label in IPF Dataset
+```{r}
+temp <- subset(ppfe_epi, Project == "IPF") 
+temp$Sample.ID %>% unique()
+rm(temp)
+
+temp <- subset(ppfe_endo, Project == "IPF") 
+temp$Sample.ID %>% unique()
+rm(temp)
+
+
+temp <- subset(ppfe_lymph, Project == "IPF") 
+temp$Sample.ID %>% unique()
+rm(temp)
+
+
+temp <- subset(ppfe_mes, Project == "IPF") 
+temp$Sample.ID %>% unique()
+rm(temp)
+
+
+temp <- subset(ppfe_myeloid, Project == "IPF") 
+temp$Sample.ID %>% unique()
+rm(temp)
+```
+```{r}
+temp <- subset(ppfe_epi, Project == "IPF") 
+temp$Sample.ID %>% unique()
+rm(temp)
+```
+
+
+```{r}
+# Adjust the orig.ident 
+
+ppfe_epi <- ppfe_epi %>%
+  mutate(orig.ident_final = case_when(Project == "IPF" & Sample.ID == "KroBan" ~ subject.ident,
+                                      Project == "IPF" & Sample.ID != "KroBan" ~ substr(Sample.ID, start = 1, stop = 3),
+                                      Project == "PPFE" ~ orig.ident)
+         )
+
+ppfe_mes <- ppfe_mes %>%
+  mutate(orig.ident_final = case_when(Project == "IPF"  ~ substr(Sample.ID, start = 1, stop = 3),
+                                      Project == "PPFE" ~ orig.ident)
+  )
+
+ppfe_endo <- ppfe_endo %>%
+  mutate(orig.ident_final = case_when(Project == "IPF"  ~ substr(Sample.ID, start = 1, stop = 3),
+                                      Project == "PPFE" ~ orig.ident)
+  )
+
+ppfe_myeloid <- ppfe_myeloid %>%
+  mutate(orig.ident_final = case_when(Project == "IPF"  ~ substr(Sample.ID, start = 1, stop = 3),
+                                      Project == "PPFE" ~ orig.ident)
+  )
+
+ppfe_lymph <- ppfe_lymph %>%
+  mutate(orig.ident_final = case_when(Project == "IPF"  ~ substr(Sample.ID, start = 1, stop = 3),
+                                      Project == "PPFE" ~ orig.ident)
+  )
+
+```
+
+```{r}
+temp <- subset(ppfe_epi, Project == "IPF") 
+temp$orig.ident_final %>% unique()
+rm(temp)
+
+temp <- subset(ppfe_endo, Project == "IPF") 
+temp$orig.ident_final %>% unique()
+rm(temp)
+
+
+temp <- subset(ppfe_lymph, Project == "IPF") 
+temp$orig.ident_final %>% unique()
+rm(temp)
+
+
+temp <- subset(ppfe_mes, Project == "IPF") 
+temp$orig.ident_final %>% unique()
+rm(temp)
+
+
+temp <- subset(ppfe_myeloid, Project == "IPF") 
+temp$orig.ident_final %>% unique()
+rm(temp)
+```
+
+
+## 1B) RPCA_REF Integration Pipline 
+```{r}
+ppfe_epi$Lineage <- "Epithelium"
+ppfe_mes$Lineage <- "Mesenchyme"
+ppfe_endo$Lineage <- "Endothelium"
+ppfe_myeloid$Lineage <- "Myeloid"
+ppfe_lymph$Lineage <- "Lymphoid"
+
+
+
+rds_list <- merge(x = ppfe_epi, y = c(ppfe_mes, ppfe_endo, ppfe_myeloid, ppfe_lymph))
+# Get a List of all samples 
+rds_list <- SplitObject(rds_list, split.by = "orig.ident_final")
+```
+
+```{r}
+rm(ppfe_endo)
+rm(ppfe_epi)
+rm(ppfe_mes)
+rm(ppfe_lymph)
+rm(ppfe_myeloid)
+```
+
+
+```{r}
+lapply(rds_list, function(x) {
+  print(dim(GetAssayData(x, assay = "RNA", slot = "counts")))  # Check dimensions of the RNA assay counts
+})
+```
+
+
+
+```{r}
+rds_list <- lapply(rds_list, function(x) {
+  DefaultAssay(x) <- "RNA"
+  x <- NormalizeData(x, verbose = FALSE)
+  x <- FindVariableFeatures(x, verbose = FALSE, nfeatures = 2000)
+  return(x)
+})
+```
+
+```{r}
+features <- SelectIntegrationFeatures(object.list = rds_list, nfeatures = 2000)
+
+## remove mito genes as integrator
+features <- features[!grepl("MT-", features)]
+```
+
+
+```{r}
+rds_list <- lapply(X = rds_list, FUN = function(x) {
+    x <- ScaleData(x, features = features, vars.to.regress = c("nCount_RNA"), verbose = FALSE)
+    x <- RunPCA(x, features = features, verbose = FALSE)
+})
+```
+```{r}
+# find smallest dataset
+#min(table(PPFE_metadata$orig.ident))
+#103
+```
+
+```{r}
+names(rds_list)
+```
+
+```{r}
+# Find Integration anchors
+anchors <- FindIntegrationAnchors(object.list = rds_list, reduction = "rpca",
+                                  reference = c(1:59))
+                                  #, dims = 1:40)
+                                  # k.filter = 90
+                                   #dims = 1:30, k.filter = 90
+
+```
+```{r}
+saveRDS(anchors, "achors_PPFE_IPF_merged_int_PPFEref.rds")
+rm(rds_list)
+```
+
+```{r}
+#ätest_final <- IntegrateData(anchorset = anchors, k.weight = 30) to low memory... >> MHH Server
+```
+
+
+```{r}
+ppfe_integrated <- readRDS("ppfe_IPF_integrated_all_lineages_18122024.rds")
+```
+
+
+
+## 1C) Post-Integration Downstream
+```{r}
+ppfe_integrated <- ScaleData(ppfe_integrated, vars.to.regress="percent.mt.n")
+ppfe_integrated <- RunPCA(ppfe_integrated, verbose = FALSE)
+ppfe_integrated <- RunUMAP(ppfe_integrated, dims = 1:15)
+```
+## 1D) Zwischen-Save
+```{r}
+saveRDS(ppfe_integrated, "PPFE_IPF_cleaned_datasetes_ALL_RPCA_integrated_18122024.rds")
+```
+
+## 1E) Introduce a coarse label (...in progress)
+```{r}
+# To be done...
+```
+
+
+## 1F) Lineage Label
+```{r}
+ppfe_integrated <- ppfe_integrated %>% 
+  mutate(Celltype_ID_final = case_when(Lineage == "Epithelium" ~ Celltype_ID_final_coarse,
+                                       Lineage == "Mesenchyme" ~ Celltype_ID_final_coarse,
+                                       Lineage == "Endothelium" ~ Celltype_ID_coarse,
+                                       Lineage == "Myeloid" ~ Celltype_ID_fine,
+                                       Lineage == "Lymphoid" ~ Celltype_ID_fine)
+         )
+
+ppfe_integrated$Lineage <- factor(ppfe_integrated$Lineage, levels = c("Mesenchyme",
+                                                                      "Lymphoid",
+                                                                      "Endothelium",
+                                                                      "Epithelium",
+                                                                      "Myeloid"))
+```
+
+
+
+
+
+## 1G) Remove Kropski-Banovich Dataset/Remove Cellsoup from Epithelium
+```{r}
+# Refine the sample ID
+ppfe_integrated <- ppfe_integrated %>%
+  mutate(Sample.ID = case_when(Project == "PPFE" ~ "PPFE",
+                               Project == "IPF" ~ Sample.ID)
+  )
+
+test <- subset(ppfe_integrated, Sample.ID != "CellSoup" & Sample.ID != "KroBan")
+
+```
+
+
+
+# 2. Downstream of Cleaned-Dataset ~"test"
+
+## 2A) Refine Embedding: "ReUMAP_50"
+```{r}
+test <- RunUMAP2(object = test, dims = 1:50, reduction = "pca", reduction.name = "ReUMAP_50", reduction.key = "ReUMAP_50")
+test <- RunUMAP2(object = test, dims = 1:20, reduction = "pca", reduction.name = "ReUMAP_20", reduction.key = "ReUMAP_20")
+```
+
+## 2B) Test Reductions/Embeddings
+```{r, fig.width=20, fig.height=20}
+#CellDimPlot(ppfe_integrated, group.by = "Celltype", raster = F, label = T, label_insitu = T, label_repel = T, legend.position = "none", reduction = "ReUMAP_30")
+CellDimPlot(ppfe_integrated, group.by = "Lineage", raster = F, label = T, label_insitu = T, label_repel = T, legend.position = "none", reduction = "ReUMAP_50", palette = "Dark2", pt.size = 0.1, combine = F)
+
+CellDimPlot(test, group.by = "Lineage", raster = F, label = T, label_insitu = T, label_repel = T, reduction = "ReUMAP_50", palette = "Dark2", pt.size = 0.1, combine = F)
+```
+
+
+# 3. Final Figures
+
+## 3A) UMAP - Celltype_ID_final
+```{r}
+p <- CellDimPlot(test, group.by = "Celltype_ID_final", raster = F, pt.size = 0.15, reduction = "ReUMAP_50", palette = "Paired", show_stat = F, xlab = "UMAP_1", ylab = "UAMP_2", legend.position = "none")+
+  theme(axis.text = element_blank(),   # Remove axis text
+        axis.ticks = element_blank())  # Remove axis ticks
+
+pdf("PPFE_ALL_UMAP.pdf", height = 14, width = 14)
+p
+dev.off()
+p
+```
+## 3B) UMAP - Lineage
+```{r}
+p <- CellDimPlot(test, group.by = "Lineage", raster = F, pt.size = 0.15, reduction = "ReUMAP_50", 
+                 #palette = "Dark2",
+                 palcolor = lin_pal,
+                 show_stat = F, xlab = "UMAP_1", ylab = "UAMP_2", legend.position = "none")+
+  theme(axis.text = element_blank(),   # Remove axis text
+        axis.ticks = element_blank())  # Remove axis ticks
+
+pdf("PPFE_ALL_MERGED_UMAP_Lineage.pdf", height = 14, width = 14)
+p
+dev.off()
+p
+```
+
+## 3C) UMAP - Disease
+```{r}
+SCP::palette_scp(palette = "Set1", n = length(test$orig.ident %>% unique()), matched = F) -> palette
+
+p <- DimPlot(test, group.by = c("orig.ident"), 
+             shuffle = T, 
+             raster = F, 
+             label = F, 
+             combine = T,
+             reduction = "ReUMAP_50")+ 
+  theme_scp()+
+  labs(x = "UMAP_1", y = "UMAP_2")+
+  NoLegend()+
+  ggtitle("Subject")+
+  scale_color_manual(values = as.vector(palette))+
+  theme(axis.text = element_blank(),   # Remove axis text
+        axis.ticks = element_blank())|
+  DimPlot(test, group.by = c("disease.ident"),
+          shuffle = T, raster = F, label = F, combine = T, 
+          reduction = "ReUMAP_50", 
+        cols =dis_pal)+
+  theme_scp()+NoLegend()+ggtitle("Disease")+
+  labs(x = "UMAP_1", y = "UMAP_2")+
+  theme(axis.text = element_blank(),   # Remove axis text
+        axis.ticks = element_blank())  # Remove axis ticks
+  
+png(filename = "PPFE_IPF_EPI_subject_Disease_UMAP_RPCA1.png", height = 14, width = 28, units = "in", res = 600)
+#pdf(file = "PPFE_Mesenchyme_subject_Disease_UMAP.pdf", width = 14, height = 7)
+p
+dev.off()
+p
+```
+## 3D) Cell Frequencies
+```{r}
+cluster_scp_pal
+```
+
+### Stacked Barplots (together)
+```{r, fig.width=14, fig.height=7}
+# Proportion / cell number composition per cluster
+ggData = data.frame(prop.table(table(test$Lineage, test$orig.ident_final), margin = 2))
+colnames(ggData) = c("Celltype_ID", "Orig.Ident",  "value")
+
+ggData <- ggData %>%
+ mutate(Disease = substr(Orig.Ident, 1,4))
+
+Batch2_Fren_IDs <- c("PPFE_PPFE21", 
+ "PPFE_PPFE22", 
+ "PPFE_PPFE25", 
+ "PPFE_PPFE26", 
+ "PPFE_PPFE27", 
+ "PPFE_PPFE28", 
+ "PPFE_PPFE29", 
+ "PPFE_PPFE30", 
+ "PPFE_PPFE31", 
+ "PPFE_PPFE32", 
+ "PPFE_PPFE33", 
+ "PPFE_PPFE34", 
+ "PPFE_PPFE35", 
+ "PPFE_PPFE37", 
+ "PPFE_PPFE38", 
+ "PPFE_PPFE40", 
+ "PPFE_PPFE23", 
+ "PPFE_PPFE24", 
+ "PPFE_PPFE36", 
+ "PPFE_PPFE39")
+
+BAtch1_Han_IDs <- c("PPFE_PPFE001" , "PPFE_PPFE002" ,  "PPFE_PPFE003" ,  "PPFE_PPFE004" ,  "PPFE_PPFE005" , "PPFE_PPFE006"  , "PPFE_PPFE007"  ,   "PPFE_PPFE008",   "PPFE_PPFE009",   "PPFE_PPFE010",   "PPFE_PPFE011",   "PPFE_PPFE012",   "PPFE_PPFE013",   "PPFE_PPFE014",   "PPFE_PPFE015a",  "PPFE_PPFE015b",  "PPFE_PPFE016",   "PPFE_PPFE017",   "PPFE_PPFE018",   "PPFE_PPFE019",   "PPFE_PPFE020", 
+                    "PPFE_PPFE40", 
+                    "PPFE_PPFE41", 
+                    "PPFE_PPFE42",
+                    "PPFE_PPFE43",
+                    "PPFE_PPFE44")
+
+CTRL_ids <- c("CTRL_GLE822" ,  "CTRL_GLE891"   ,"CTRL_CTRL002",  "CTRL_GLR632"   ,"CTRL_GLR635",   "CTRL_CTRL007",  "CTRL_GLE639"  , "CTRL_GLR609" ,  "CTRL_GLR725"  ,"CTRL_CTR048"  , "CTRL_CTR068" ,  "CTRL_CTR069" ,  "CTRL_CTR070", "CTRL_CTR058", "CTRL_CTR071" , "CTRL_CTR051")
+
+
+
+ggData <- ggData %>%
+ mutate(Disease = case_when(Orig.Ident %in% Batch2_Fren_IDs ~ "France_PPFE",
+                            Orig.Ident %in% BAtch1_Han_IDs ~ "Germany_PPFE",
+                            Orig.Ident %in% CTRL_ids ~ "Germany_CTRL",
+                            .default = "Belgium_IPF")
+        )
+
+ggData$Disease <- factor(ggData$Disease, levels = c("Germany_CTRL", "France_PPFE", "Germany_PPFE", "Belgium_IPF"))
+
+
+
+test$Celltype_ID_final_coarse %>% unique() -> Celltypes
+levels(Celltypes)
+
+#cluster_scp_pal <- SCP::palette_scp(x = c( "Epithelium","Mesenchyme","Endothelium", "Lymphoid","Myeloid"), palcolor = lin_pal)
+
+patient_order <- ggData %>%
+  dplyr::filter(Celltype_ID == 'Lymphoid') %>% 
+  arrange(Disease, desc(value)) %>% # Zuerst nach Disease, dann nach value absteigend
+  pull(Orig.Ident)
+
+# Convert Patient_ID to a factor with the specific order
+ggData$Orig.Ident <- factor(ggData$Orig.Ident, levels = patient_order)
+
+
+# Calculate median values for each Celltype_ID within each Disease group
+medians <- ggData %>%
+  dplyr::filter(Disease =="Germany_PPFE") %>%
+  group_by(Disease, Celltype_ID) %>%
+  summarize(median_value = median(value)) %>%
+  ungroup()
+
+# Order Celltype_ID based on median values
+ordered_celltypes <- medians %>%
+  group_by(Celltype_ID) %>%
+  summarize(overall_median = median(median_value)) %>%
+  arrange(overall_median) %>%
+  pull(Celltype_ID)
+ordered_celltypes
+
+# Update the levels of Celltype_ID in ggData
+ggData$Celltype_ID <- factor(ggData$Celltype_ID, levels = c( "Epithelium","Mesenchyme","Endothelium", "Myeloid","Lymphoid")
+                             )
+
+
+# Plot with normalized bars
+p <- ggplot(ggData, aes(x = Orig.Ident, y = value, fill = Celltype_ID)) +
+  geom_bar(stat = "identity", position = "fill", size = 0.5, color = "black") +
+  labs(title = "Stacked Bar Plot of Cell Type Frequencies by Patient (Ordered by Disease Cohort)",
+       x = "Patient ID",
+       y = "Proportion (%)") + 
+  scale_fill_manual(values = lin_pal) +
+  scale_color_manual(values = lin_pal) +
+  theme_scp() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+p
+
+
+png("PPFE_IPF_ALL_RPCA_Stacked_barplot_nofacet_repal.png", units = "in", width = 14, height = 6, res = 600)
+p
+dev.off()
+```
+
+### Stacked Barplots (Facet_Wrap)
+```{r, fig.width=14, fig.height=7}
+p <- ggplot(ggData, aes(x = Orig.Ident, y = value, fill = Celltype_ID)) +
+  geom_bar(stat = "identity", position = "stack", size = 0.5, color = "black") +
+  labs(title = "Stacked Bar Plot of Cell Type Frequencies by Patient",
+       x = "Patient ID",
+       y = "Frequency (%)") + 
+  scale_fill_discrete(cluster_scp_pal) +
+  scale_color_discrete(cluster_scp_pal) +
+  scale_x_discrete(expand = expansion(mult = 0.1)) + 
+  scale_fill_manual(values = cluster_scp_pal) +
+  scale_color_manual(values = cluster_scp_pal) +
+  theme_scp() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.spacing = unit(1, "lines") # Einheitlicher Abstand zwischen Facets
+  ) +
+  facet_wrap(~Disease, scales = "free_x", ncol = 4) # x-Achse je Disease dynamisch
+
+p
+```
+
+### Boxplots
+```{r, fig.width=7}
+# Convert disease.ident and Celltype to factors
+ggData$Disease <- as.factor(ggData$Disease)
+ggData$Celltype_ID <- as.factor(ggData$Celltype_ID)
+
+# Calculate the median frequency for each cell type
+median_frequencies <- ggData %>%
+  group_by(Celltype_ID) %>%
+  summarize(median_freq = median(value)) %>%
+  arrange(-median_freq)
+
+# Reorder the Celltype factor levels based on median frequency
+ggData$Celltype_ID <- factor(ggData$Celltype_ID, levels = median_frequencies$Celltype_ID)
+
+# Plot
+p <- ggplot(ggData, aes(x = Celltype_ID, y = value, fill = Disease)) +
+  geom_boxplot() +
+  labs(title = "Comparison of Cell Type Frequencies Between Disease Groups",
+       x = "Cell Type",
+       y = "Frequency (%)") +
+  scale_fill_manual(values = cohort_pal) +
+  scale_color_manual(values =cohort_pal) +
+  theme_scp() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Add statistical comparisons
+p <- p + stat_compare_means(aes(group = Disease), method = "t.test", label = "p.signif")
+
+#==============================================
+
+# Plot
+p <- ggplot(ggData, aes(x = Celltype_ID, y = value, fill = Disease)) +
+  geom_boxplot(outlier.shape = NA) +
+  labs(title = "Lineage Frequencies",
+       x = "Lineage",
+       y = "Relative Frequency [%]") +
+  scale_fill_manual(values =cohort_pal) +
+  scale_color_manual(values =cohort_pal) +
+  theme_scp() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Add statistical comparisons
+p + stat_compare_means(aes(group = Disease), label = "p.signif")
+
+# Display the plot
+print(p)
+```
+```{r}
+png("PPFE_IPF_ALL_boxplots.png", units = "in", width = 7, height = 7, res = 600)
+p
+dev.off()
+```
+
+
+### Dataframe Export Cellfrequencies
+```{r}
+library(dplyr)
+library(openxlsx)
+
+# Initialize a workbook
+wb <- createWorkbook()
+
+# Germany_PPFE
+median_frequencies_Germany_PPFE <- ggData %>%
+  filter(Disease == "Germany_PPFE") %>%
+  group_by(Celltype_ID) %>%
+  summarize(
+    median_freq = mean(value),
+    sd_freq = sd(value)
+  ) %>%
+  arrange(-median_freq)
+
+addWorksheet(wb, "Germany_PPFE")
+writeData(wb, "Germany_PPFE", median_frequencies_Germany_PPFE)
+
+# France_PPFE
+median_frequencies_France_PPFE <- ggData %>%
+  filter(Disease == "France_PPFE") %>%
+  group_by(Celltype_ID) %>%
+  summarize(
+    median_freq = mean(value),
+    sd_freq = sd(value)
+  ) %>%
+  arrange(-median_freq)
+
+addWorksheet(wb, "France_PPFE")
+writeData(wb, "France_PPFE", median_frequencies_France_PPFE)
+
+# Germany_CTRL
+median_frequencies_Germany_CTRL <- ggData %>%
+  filter(Disease == "Germany_CTRL") %>%
+  group_by(Celltype_ID) %>%
+  summarize(
+    median_freq = mean(value),
+    sd_freq = sd(value)
+  ) %>%
+  arrange(-median_freq)
+
+addWorksheet(wb, "Germany_CTRL")
+writeData(wb, "Germany_CTRL", median_frequencies_Germany_CTRL)
+
+# Dutch_IPF
+median_frequencies_Dutch_IPF <- ggData %>%
+  filter(Disease == "Durch_IPF") %>%
+  group_by(Celltype_ID) %>%
+  summarize(
+    median_freq = mean(value),
+    sd_freq = sd(value)
+  ) %>%
+  arrange(-median_freq)
+
+addWorksheet(wb, "Durch_IPF")
+writeData(wb, "Durch_IPF", median_frequencies_Dutch_IPF)
+
+
+# Save the workbook
+saveWorkbook(wb, "PPFE_IPF_Celltype_Frequencies_ALL_b1b2_RPCA.xlsx", overwrite = TRUE)
+
+
+```
+
+
+### Absolute Cell Frequencies per Disease
+```{r}
+# Reorder the Celltype factor levels based on median frequency
+test$Lineage <- factor(test$Lineage, levels = c( "Epithelium","Mesenchyme","Endothelium", "Myeloid","Lymphoid")
+                                                )
+
+CellStatPlot(test, stat.by = "disease.ident", group.by = "Lineage", stat_type = "count", plot_type = "trend", palcolor = dis_pal)
+```
+
+
+### Stackd Barplots per Disease
+```{r, fig.width=4}
+# Reorder the Celltype factor levels based on median frequency
+test$Lineage <- factor(test$Lineage, levels = c( "Epithelium","Mesenchyme","Endothelium", "Myeloid","Lymphoid")
+                                                )
+```
+
+
+```{r, fig.width=4}
+p <- CellStatPlot(test, stat.by = "Lineage", group.by = "disease.ident", stat_type = "percent", plot_type = "bar", 
+             #palcolor = c("#E7298A","#1B9E77",  "#7570B3", "#66A61E", "#D95F02" )
+             palcolor = lin_pal
+             )
+
+
+
+png(filename = "PPFE_Merged_all_StackedBar_per_Lineage.png", width = 4, height = 7, units = "in", res = 600)
+p
+dev.off()
+```
+
+## 3E) Unity_Normalized Heatmap
+
+### Get Markers per Lineage
+```{r}
+test$Lineage %>% unique()
+Idents(test) <- "Lineage"
+Final_Degs_Lineage <- FindAllMarkers(object = test, assay = "RNA", logfc.threshold = 1.5, only.pos = T)
+
+TOP_300_markers  <- Final_Degs_Lineage
+
+TOP_300_markers <- TOP_300_markers %>%
+  dplyr::mutate(TP = pct.1,
+                FN = 1 - pct.1,
+                FP = pct.2,
+                TN = 1 - pct.2,
+                DOR = (TP/FN)/(FP/TN),
+                logDOR = log(DOR)
+                )
+
+TOP_300_markers %>%
+  group_by(cluster) %>%    
+  top_n(n = 300, wt = logDOR) -> TOP_300_markers
+
+write.xlsx(TOP_300_markers, "Top300_Lineage_DEGs_PPFE_IPF_19122024.xlsx")
+
+TOP_300_markers
+```
+```{r}
+SCP::ListDB(species = "Homo_sapiens", db = NULL)
+```
+
+### Marker Gene Selection
+```{r}
+Lineage_genes <- c( "FXYD3", "EPCAM", "ELF3",#"EPCAM", "SLC34A2", "KRT7", "NKX2-1",
+           "COL1A2", "DCN", "MFAP4", #"COL1A1", "COL3A1", "ELN", "COL6A2",
+           "CLDN5", "CDH5", "CLEC14A", # "CDH5",  "PECAM1", "VWF", "BMPR2",
+           "FCER1G", "C1orf162", "CLEC7A", #"CD68", "LYZ", "TLR2", "CSF1R",
+           "CORO1A", "ISG20",  "PTPRC" #"CD2", "IL7R", "IL2RG", "CCL5"
+           )
+```
+
+### ReOrder the Celltypes
+```{r}
+test$Lineage %>% unique()
+
+test$Celltype_ID_final_heat <- factor(test$Celltype_ID_final, levels = c(
+    "AEC2", "AEC1", "Club", "AEC_intermediate", "Basal", "Secretory", 
+    "Aberrant_Basaloid", "Goblet", "Ciliated", "PNEC", "Mesothelium","Schwann_Neu",
+   "Pericytes", "Alveolar_Fb", "Adventitial_Fb", "Subpleural_Fb", 
+    "Adventitial_like_Fb", "Smooth_Muscle", "CTHRC1_MyoFb", "Airway_Fb",
+   "EC_pulmonary_venous", "EC_arterial", "EC_general_cap", "EC_systemic_venous", 
+    "EC_aerocyte", "EC_lymphatic",
+   "Fibrotic_Macrophage", "Monocyte_derived_Macrophage", "Alveolar_Macrophage", 
+    "Monocyte_nonClassical", "Monocyte_Classical", "DC2", "DC1", "Mast", 
+    "IFNresp_Monocyte_derived_Macrophage", "pDC", "Langerhans-Cells", 
+    "Macrophage_Cycling", "Neutro",
+   "CD4+_TC_naive", "CD4+_TC_effector_memory", "CD4+_TC_TH1", "Treg", 
+    "NK_Cells_CD16+", "CD8+_TC_resident_memory", "B_Cells_memory", 
+    "CD8+_TC_effector_memory", "ILC3", "gamma_delta_TC", "CD4+_TC_TH17", 
+    "CD4+_TC_Cytotoxic", "B_Cells_naive", "Plasma_Cells", "NK_Cells_CD16-")
+)
+```
+### Standardize Cohort Annotation for Heatmap
+```{r}
+test$Project %>% unique()
+
+Batch2_Fren_IDs <- c("PPFE_PPFE21", 
+ "PPFE_PPFE22", 
+ "PPFE_PPFE25", 
+ "PPFE_PPFE26", 
+ "PPFE_PPFE27", 
+ "PPFE_PPFE28", 
+ "PPFE_PPFE29", 
+ "PPFE_PPFE30", 
+ "PPFE_PPFE31", 
+ "PPFE_PPFE32", 
+ "PPFE_PPFE33", 
+ "PPFE_PPFE34", 
+ "PPFE_PPFE35", 
+ "PPFE_PPFE37", 
+ "PPFE_PPFE38", 
+ "PPFE_PPFE40", 
+ "PPFE_PPFE23", 
+ "PPFE_PPFE24", 
+ "PPFE_PPFE36", 
+ "PPFE_PPFE39")
+
+BAtch1_Han_IDs <- c("PPFE_PPFE001" , "PPFE_PPFE002" ,  "PPFE_PPFE003" ,  "PPFE_PPFE004" ,  "PPFE_PPFE005" , "PPFE_PPFE006"  , "PPFE_PPFE007"  ,   "PPFE_PPFE008",   "PPFE_PPFE009",   "PPFE_PPFE010",   "PPFE_PPFE011",   "PPFE_PPFE012",   "PPFE_PPFE013",   "PPFE_PPFE014",   "PPFE_PPFE015a",  "PPFE_PPFE015b",  "PPFE_PPFE016",   "PPFE_PPFE017",   "PPFE_PPFE018",   "PPFE_PPFE019",   "PPFE_PPFE020", 
+                    "PPFE_PPFE40", 
+                    "PPFE_PPFE41", 
+                    "PPFE_PPFE42",
+                    "PPFE_PPFE43",
+                    "PPFE_PPFE44")
+
+CTRL_ids <- c("CTRL_GLE822" ,  "CTRL_GLE891"   ,"CTRL_CTRL002",  "CTRL_GLR632"   ,"CTRL_GLR635",   "CTRL_CTRL007",  "CTRL_GLE639"  , "CTRL_GLR609" ,  "CTRL_GLR725"  ,"CTRL_CTR048"  , "CTRL_CTR068" ,  "CTRL_CTR069" ,  "CTRL_CTR070", "CTRL_CTR058", "CTRL_CTR071" , "CTRL_CTR051")
+
+
+
+test <- test %>%
+ mutate(Cohort = case_when(orig.ident_final %in% Batch2_Fren_IDs ~ "France",
+                            orig.ident_final %in% BAtch1_Han_IDs ~ "Germany",
+                            orig.ident_final %in% CTRL_ids ~ "Germany",
+                            .default = "Belgium")
+        )
+
+
+
+
+PPFE_lym$disease.ident_cohort %>% unique()
+
+test$disease.ident_cohort %>% unique()
+```
+### Start Heatmap-Script
+```{r}
+### with multithreading, first make all possible combinations
+FullDataset_Object <-  test  #!= "KroBan")
+
+
+celltypes_to_plot <- levels(as.factor(test$Celltype_ID_final_heat))
+
+FullDataset_Object$cellBarcode <- colnames(FullDataset_Object)
+
+cellTypes <- levels(as.factor(FullDataset_Object$Celltype_ID_final_heat))
+
+cellTypes <- cellTypes[cellTypes %in% celltypes_to_plot]
+
+Lineages <- levels(test$Lineage)
+
+meta.data.sub <- FullDataset_Object@meta.data[,c("Cohort",
+                                                 "disease.ident", # cohort.ident condition
+                                                 "Celltype_ID_final_heat", # cell.type.ident
+                                                 "orig.ident_final", # subject.ident
+                                                 "cellBarcode")]
+
+
+
+get.CT.DS.subj.vector <- function(cellTypes){
+  
+  tmp.meta.data <- meta.data.sub %>% dplyr::filter(Celltype_ID_final_heat == cellTypes)
+  
+  cohorts <- unique(tmp.meta.data$Cohort)
+  
+  disease <- unique(tmp.meta.data$disease.ident)
+  
+  subjects <- unique(tmp.meta.data$orig.ident_final)
+  
+  tmp.CT.DS.subj.vector <- vector()
+  
+  for(j in 1:length(cohorts)){
+    
+    for(k in 1:length(disease)){
+      
+      for(l in 1:length(subjects)){
+      
+      temp.cells <- tmp.meta.data %>% dplyr::filter(Cohort==cohorts[j] & disease.ident==disease[k] & orig.ident_final==subjects[l]) %>% pull(cellBarcode)
+      
+      if ( length(temp.cells) >15 ) { # >=
+        
+        tmp.CT.DS.subj.vector <- c(tmp.CT.DS.subj.vector, paste(cellTypes, cohorts[j], disease[k], subjects[l], sep="__"))
+        
+        }
+      }
+      
+    }
+
+  }
+  
+  cat("Completed for ", cellTypes, ".\n", sep="")
+  
+  return(tmp.CT.DS.subj.vector)
+  
+}
+
+celltype_cohort_subject.list <- parallel::mclapply(cellTypes, get.CT.DS.subj.vector, mc.cores=1)
+
+celltype_cohort_subject <- unlist(celltype_cohort_subject.list)
+celltype_cohort_subject %>% tail(300)
+```
+```{r}
+library(Matrix)
+
+DefaultAssay(FullDataset_Object) <- "RNA"
+
+get.SubjectcohortCellTypeAvg <- function(celltype_cohort_subject){
+  
+  temp.cell.type <- strsplit(as.character(celltype_cohort_subject),"__")[[1]][1]
+  
+  temp.cohort <- strsplit(as.character(celltype_cohort_subject),"__")[[1]][2]
+  
+  temp.disease <- strsplit(as.character(celltype_cohort_subject),"__")[[1]][3]
+  
+  temp.subject <- strsplit(as.character(celltype_cohort_subject),"__")[[1]][4]
+  
+  temp.meta.data <- FullDataset_Object@meta.data[,c("Cohort", "disease.ident", "Celltype_ID_final_heat", "orig.ident_final", "cellBarcode")]
+  
+  temp.cells <- temp.meta.data %>% dplyr::filter(Celltype_ID_final_heat==temp.cell.type & Cohort==temp.cohort & disease.ident==temp.disease &
+                                            
+                                            orig.ident_final==temp.subject) %>% pull(cellBarcode)
+  
+  if (length(temp.cells) > 15) {
+    
+    tmp.df <- as.data.frame(rowMeans(GetAssayData(FullDataset_Object)[,temp.cells]))       
+    
+  } else {
+    
+    tmp.df <- as.data.frame(GetAssayData(FullDataset_Object)[,temp.cells])
+    
+    cat("Subject",temp.subject,"only has 1",temp.cell.type,"cell, using singlet for",temp.cohort,"representation...\n",sep=" ")
+    
+  }
+  
+  colnames(tmp.df) <- paste(celltype_cohort_subject)
+  
+  return(tmp.df)
+  
+}
+
+
+
+collapsed.mtx.list <- parallel::mclapply(celltype_cohort_subject, get.SubjectcohortCellTypeAvg, mc.cores=1)
+
+collapsed.SubjectcohortCellTypeAvg.mtx <- Matrix(as.matrix(do.call(cbind, collapsed.mtx.list)), sparse = TRUE)
+
+dim(collapsed.SubjectcohortCellTypeAvg.mtx) # Average for each subject for each gene 
+
+```
+```{r}
+heatmap_metadata <- as.data.frame(cbind(colnames(collapsed.SubjectcohortCellTypeAvg.mtx),
+                                        
+                                        sapply(strsplit(as.character(colnames(collapsed.SubjectcohortCellTypeAvg.mtx)),"__"), `[`, 1),
+                                        
+                                        sapply(strsplit(as.character(colnames(collapsed.SubjectcohortCellTypeAvg.mtx)),"__"), `[`, 2),
+                                        
+                                        sapply(strsplit(as.character(colnames(collapsed.SubjectcohortCellTypeAvg.mtx)),"__"), `[`, 3),
+                                        
+                                        sapply(strsplit(as.character(colnames(collapsed.SubjectcohortCellTypeAvg.mtx)),"__"), `[`, 4)
+                                        )
+                                  )
+
+
+colnames(heatmap_metadata) <- c("cell.ident","cell.type.ident", "cohort.ident", "disease.ident", "subject.ident")
+
+
+heatmap_metadata
+```
+```{r}
+heatmap_metadata$cell.type.ident <- factor(heatmap_metadata$cell.type.ident, levels=celltypes_to_plot)
+
+heatmap_metadata$cohort.ident <- factor(heatmap_metadata$cohort.ident, levels=c("Germany", "France","Belgium"))
+
+heatmap_metadata$disease.ident <- factor(heatmap_metadata$disease.ident, levels=c( "CTRL", "PPFE", "IPF"))
+
+heatmap_metadata
+```
+```{r}
+cell_order <- heatmap_metadata %>% arrange(cell.type.ident, cohort.ident, disease.ident, subject.ident ) %>% pull(cell.ident)
+
+cohort_order <- heatmap_metadata %>% arrange(cell.type.ident, cohort.ident,  disease.ident, subject.ident ) %>% pull(cohort.ident)
+
+disease_order <- heatmap_metadata %>% arrange(cell.type.ident, cohort.ident, disease.ident, subject.ident ) %>% pull(disease.ident)
+
+celltype_order <- heatmap_metadata %>% arrange(cell.type.ident, cohort.ident,  disease.ident, subject.ident ) %>% pull(cell.type.ident)
+
+subject_order <- heatmap_metadata %>% arrange(cell.type.ident, cohort.ident,  disease.ident, subject.ident ) %>% pull(subject.ident )
+
+celltype_order
+```
+
+```{r}
+heatmap_df1 <-  as.matrix(collapsed.SubjectcohortCellTypeAvg.mtx[Lineage_genes,cell_order])
+heatmap_df <- heatmap_df1
+```
+
+### Normalize by Cohort: Hannover vs. Leuven
+```{r}
+ppfe_cells <- heatmap_metadata %>% 
+    dplyr::filter(cohort.ident %in% c("Germany", "France")) %>% 
+    pull(cell.ident)
+
+ipf_cells <- heatmap_metadata %>% dplyr::filter(cohort.ident == "Belgium") %>% pull(cell.ident)
+
+heatmap_df_ppfe <- heatmap_df[, ppfe_cells]
+heatmap_df_ipf <- heatmap_df[, ipf_cells]
+
+
+heatmap_metadata %>% dplyr::filter(cohort.ident == "Belgium")
+```
+
+
+
+
+```{r}
+myUnityNormalize <- function(x){(x-min(x))/(max(x)-min(x))}
+
+# Normalize each subset
+heatmap_df_ppfe_normalized <- t(apply(heatmap_df_ppfe, MARGIN = 1, FUN = myUnityNormalize))
+heatmap_df_ipf_normalized <- t(apply(heatmap_df_ipf, MARGIN = 1, FUN = myUnityNormalize))
+
+
+# Combine both normalized datasets
+heatmap_df_normalized <- cbind(heatmap_df_ppfe_normalized, heatmap_df_ipf_normalized)
+
+heatmap_df_normalized <- heatmap_df_normalized[,cell_order]  # Originale Reihenfolge wiederherstellen
+```
+
+
+### Create Ordering for column split
+```{r, fig.width=20, fig.height=9.5}
+Epithelial = c(
+    "AEC2", "AEC1", "Club", "AEC_intermediate", "Basal", "Secretory", 
+    "Aberrant_Basaloid", "Goblet", "Ciliated", "PNEC", "Mesothelium","Schwann_Neu"
+  )
+Mesenchymal = c(
+    "Pericytes", "Alveolar_Fb", "Adventitial_Fb", "Subpleural_Fb", 
+    "Adventitial_like_Fb", "Smooth_Muscle", "CTHRC1_MyoFb", "Airway_Fb"
+  )
+Endothelial = c(
+    "EC_pulmonary_venous", "EC_arterial", "EC_general_cap", "EC_systemic_venous", 
+    "EC_aerocyte", "EC_lymphatic"
+  )
+Myeloids = c(
+    "Fibrotic_Macrophage", "Monocyte_derived_Macrophage", "Alveolar_Macrophage", 
+    "Monocyte_nonClassical", "Monocyte_Classical", "DC2", "DC1", "Mast", 
+    "IFNresp_Monocyte_derived_Macrophage", "pDC", "Langerhans-Cells", 
+    "Macrophage_Cycling", "Neutro"
+  )
+Lymphocytes = c(
+    "CD4+_TC_naive", "CD4+_TC_effector_memory", "CD4+_TC_TH1", "Treg", 
+    "NK_Cells_CD16+", "CD8+_TC_resident_memory", "B_Cells_memory", 
+    "CD8+_TC_effector_memory", "ILC3", "gamma_delta_TC", "CD4+_TC_TH17", 
+    "CD4+_TC_Cytotoxic", "B_Cells_naive", "Plasma_Cells", "NK_Cells_CD16-"
+  )
+
+split_order <- celltype_order 
+
+# Function to rename based on occurrence in groups
+rename_celltypes <- function(celltypes, Epithelial, Mesenchymal, Endothelial, Myeloids, Lymphocytes) {
+  sapply(celltypes, function(ct) {
+    if (ct %in% Epithelial) {
+      return("Epithelium")
+    } else if (ct %in% Mesenchymal) {
+      return("Mesenchyme")
+    } else if (ct %in% Endothelial) {
+      return("Endothelium")
+    } else if (ct %in% Myeloids) {
+      return("Myeloids")
+    } else if (ct %in% Lymphocytes) {
+      return("Lymphocytes")
+    } else {
+      return("Unknown")
+    }
+  })
+}
+
+# Rename cell types
+renamed_celltypes <- rename_celltypes(celltype_order, Epithelial, Mesenchymal, Endothelial, Myeloids, Lymphocytes)
+
+# View renamed cell types
+renamed_celltypes %>% unique()
+
+renamed_celltypes <- factor(renamed_celltypes, levels = c("Epithelium", "Mesenchyme", "Endothelium", "Myeloids", "Lymphocytes"))
+
+# Check final ordering of factor levels
+renamed_celltypes %>% levels()
+```
+
+
+```{r}
+library(ComplexHeatmap)
+#dis_pal <- list("royalblue","red3", "darkgreen")
+#cohort_pal <- list("darkgrey", "lightgrey")
+
+cohort_colors <- palette_scp(x = cohort_order, palcolor = cohort_pal_heat, n = 3, matched = F) # disease.pal
+disease_colors <- palette_scp(x = disease_order, palcolor = dis_pal, n = 3, matched = F) # disease.pal
+celltype_colors <- palette_scp(x = celltype_order, palette = "Paired", n = 10, matched = F)
+subject_colors <- SCP::palette_scp(x = subject_order,  palcolor = subject_pal, n = 111, matched = F)
+lineage_colors <- SCP::palette_scp(x = renamed_celltypes, palcolor = lin_pal, n = 5, matched = F)
+
+heatmap_cohort_annotation <- HeatmapAnnotation(lineage = renamed_celltypes, cell_type=celltype_order, cohort=cohort_order, disease = disease_order, subject=subject_order, 
+                                               
+                                               col = list(cohort=cohort_colors, disease = disease_colors, lineage = lineage_colors, cell_type=celltype_colors, subject=subject_colors),
+                                               
+                                               show_legend = c("subject" = FALSE))
+
+
+
+```
+
+```{r, fig.width=20, fig.height=9.5}
+library(viridis)
+p <- Heatmap(heatmap_df_normalized, 
+        col = viridis(256), 
+        cluster_rows = F, 
+        cluster_columns = F, 
+        show_column_names = FALSE, 
+        top_annotation=heatmap_cohort_annotation, 
+        column_split=renamed_celltypes, 
+        #row_split = c(rep("1. Celltype Marker", nrow(heatmap_df1)), rep("2. Aberrant Basaloid Marker", nrow(heatmap_df2))),  # split to create visual separation
+       # row_gap = unit(c(2, 2), "mm"),  # larger gap around the separation line
+        column_title = NULL, 
+        use_raster=FALSE,
+        column_gap = unit(0.5, "mm"))
+
+
+png(filename = "PPFE_IPF_ALL_LINEAGES_HEATMAP_RPCA_Aberrant_Features_bycohort_recol.png", height = 5, width = 15, units = "in", res = 600)
+#pdf("PPFE_MES_UMAP.pdf", height = 7, width = 7)
+p
+dev.off()
+p
+```
+#======================
+
+# Final Save
+```{r}
+# Important facts 
+# - KroBan & CellSoup was removed 
+# - ReUMAP_50 Final Reduction (ReRun after removeal of Kroban and CellSoup)
+# - Cohort Annotation was refined for Heatmap
+# - Lineages were reordered
+
+saveRDS(test, "PPFE_cleaned_datasetes_ALL_RPCA_clean_integrated_22_12_2024.rds")
+```

@@ -1,0 +1,235 @@
+---
+title: "Differential_CellChatAnalysis"
+author: "Jannik Ruwisch"
+date: "2025-01-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T,
+                      fig.width = 14,
+                      fig.height = 7,
+                      #dpi = 1200,
+                      dev = "png",
+                      cache = F)
+```
+
+# Load libraries
+```{r}
+library(CellChat)
+library(patchwork)
+library(tidyseurat)
+library(Seurat)
+options(stringsAsFactors = FALSE)
+```
+
+# Choose Folder
+```{r}
+output_dir <-  choose.dir()
+```
+
+
+# 1. Read and prepare Dataset for Cellchat
+```{r}
+test <- readRDS("./PPFE_merged_final.rds")
+
+# Subset PPFE and CTRL 
+test <- subset(test, disease.ident == "CTRL")
+test_PPFE <- subset(test, disease.ident == "PPFE")
+
+# Set the Identity
+Idents(test) <- "orig.ident_final"
+
+# Subsample random barcodes 100 per celltype in each subject
+df <- data.frame(condition=test$disease.ident, 
+                 cell_type=test$Celltype_ID_final_heat, pat = test$orig.ident_final)
+df$barcode <- rownames(df)
+
+subs_df <- df %>% 
+  group_by(condition, cell_type, pat) %>% 
+  slice_sample(n=100) 
+
+# Subset the Seurat object based on the barcodes
+test_small <- subset(test, cells = subs_df$barcode)
+
+# Inspect the subsetted Seurat object
+SCP::CellDimPlot(test_small, 
+                 palcolor = pal, 
+                 group.by = "Celltype_ID_final_niche", 
+                 legend.position = "top", 
+                 raster = F, 
+                 reduction = "ReUMAP_50")
+
+
+# Factorize
+test_small$orig.ident_final <- as.factor(test_small$orig.ident_final)
+test_small$disease.ident <- as.factor(test_small$disease.ident)
+test_small$Celltype_ID_final_heat <- as.factor(test_small$Celltype_ID_final_heat)
+
+# Adjust characters in celltype names
+test_small <- test_small %>%
+  mutate(Celltype_ID_final_niche = factor(case_when(Celltype_ID_final_heat == "CD4+_TC_naive" ~ "CD4_TC_naive",
+                                             Celltype_ID_final_heat == "CD4+_TC_effector_memory" ~ "CD4_TC_effector",
+                                             Celltype_ID_final_heat == "CD4+_TC_TH17" ~ "CD4_TC_effector",
+                                             Celltype_ID_final_heat == "CD4+_TC_TH1" ~ "CD4_TC_effector",
+                                             Celltype_ID_final_heat == "CD8+_TC_effector_memory" ~ "CD8_TC_effector_memory",
+                                             Celltype_ID_final_heat == "NK_Cells_CD16+" ~ "NKCellsCD16_hi",
+                                             Celltype_ID_final_heat == "NK_Cells_CD16-" ~ "NKCellsCD16_lo",
+                                             Celltype_ID_final_heat == "CD8+_TC_resident_memory" ~ "CD8_TC_resident_memory",
+                                             Celltype_ID_final_heat == "CD4+_TC_Cytotoxic" ~ "CD4_TC_Cytotoxic",
+                                             Celltype_ID_final_heat == "Schwann_Neu" ~ "Basal",
+                                             Celltype_ID_final_heat == "PNEC" ~ "Basal",
+                                             Celltype_ID_final_heat == "Langerhans-Cells" ~ "LangerhansCells",
+                                             .default = Celltype_ID_final_heat)
+                                             )
+                                          )
+saveRDS(test_small, "PPFE_CTRL_ALL_subsampled_celltype_origIdent.rds")
+```
+
+#================
+# Cellchat Pipeline
+
+## PPFE 
+```{r}
+# Filter for PPFE
+test_PPFE <- subset(test_small, disease.ident =="PPFE")
+```
+
+### Start Cellchat 
+```{r}
+data.input <- test_PPFE[["RNA"]]@data # normalized data matrix
+
+# For Seurat version >= “5.0.0”, get the normalized data via `seurat_object[["RNA"]]$data`
+Idents(test_PPFE) <- "Celltype_ID_final_niche"
+labels <- Idents(test_PPFE)
+meta <- data.frame(labels = labels, row.names = names(labels)) # create a dataframe of the cell labels
+cellchat <- createCellChat(object = data.input, meta = meta, group.by = "labels")
+test_PPFE$samples <- test_PPFE$orig.ident_final
+cellchat <- createCellChat(object = test_PPFE, group.by = "Celltype_ID_final_niche", assay = "RNA")
+CellChatDB <- CellChatDB.human # use CellChatDB.mouse if running on mouse data
+showDatabaseCategory(CellChatDB)
+CellChatDB.use <- subsetDB(CellChatDB)
+cellchat@DB <- CellChatDB.use
+
+# subset the expression data of signaling genes for saving computation cost
+options(future.globals.maxSize = 2 * 1024^3)  # Set to 2 GiB
+cellchat <- subsetData(cellchat) # This step is necessary even if using the whole database
+future::plan("multisession", workers = 5) # do parallel
+cellchat <- identifyOverExpressedGenes(cellchat)
+cellchat <- identifyOverExpressedInteractions(cellchat)
+execution.time = Sys.time() - ptm
+print(as.numeric(execution.time, units = "secs"))
+```
+
+```{r}
+# Increase the max size for globals
+options(future.globals.maxSize = 6 * 1024^3)  # 6 GiB
+ptm = Sys.time()
+cellchat <- computeCommunProb(cellchat, type = "triMean") 
+cellchat <- filterCommunication(cellchat, min.cells = 10)
+cellchat <- computeCommunProbPathway(cellchat)
+cellchat <- aggregateNet(cellchat)
+execution.time = Sys.time() - ptm
+print(as.numeric(execution.time, units = "secs"))
+
+# Save Cellchat PPFE object
+saveRDS(cellchat, "Cellchat_Celltype_30012025_PPFE.rds")
+CellChatPPFE <- netAnalysis_computeCentrality(cellchat, slot.name = "netP") 
+```
+
+### Stop threads
+```{r}
+future:::ClusterRegistry("stop")
+```
+
+## CTRL
+```{r}
+test_PPFE <- subset(test_small, disease.ident =="CTRL")
+rm(test_small)
+rm(test_small_PPFE_CTRL)
+rm(seuratObj)
+rm(PPFE_epi)
+
+test_CTRL <- test_PPFE
+rm(test_PPFE)
+```
+
+
+### Start Cellchat 
+```{r}
+data.input <- test_CTRL[["RNA"]]@data # normalized data matrix
+# For Seurat version >= “5.0.0”, get the normalized data via `seurat_object[["RNA"]]$data`
+Idents(test_CTRL) <- "Celltype_ID_final_niche"
+labels <- Idents(test_CTRL)
+meta <- data.frame(labels = labels, row.names = names(labels)) # create a dataframe of the cell labels
+cellchat <- createCellChat(object = data.input, meta = meta, group.by = "labels")
+```
+```{r}
+test_CTRL$samples <- test_CTRL$orig.ident_final
+cellchat <- createCellChat(object = test_CTRL, group.by = "Celltype_ID_final_niche", assay = "RNA")
+CellChatDB <- CellChatDB.human # use CellChatDB.mouse if running on mouse data
+showDatabaseCategory(CellChatDB)
+CellChatDB.use <- subsetDB(CellChatDB)
+cellchat@DB <- CellChatDB.use
+
+# subset the expression data of signaling genes for saving computation cost
+options(future.globals.maxSize = 2 * 1024^3)  # Set to 2 GiB
+cellchat <- subsetData(cellchat) # This step is necessary even if using the whole database
+future::plan("multisession", workers = 5) # do parallel
+cellchat <- identifyOverExpressedGenes(cellchat)
+cellchat <- identifyOverExpressedInteractions(cellchat)
+execution.time = Sys.time() - ptm
+print(as.numeric(execution.time, units = "secs"))
+
+options(future.globals.maxSize = 6 * 1024^3)  # 6 GiB
+ptm = Sys.time()
+cellchat <- computeCommunProb(cellchat, type = "triMean")
+cellchat <- filterCommunication(cellchat, min.cells = 10)
+cellchat <- computeCommunProbPathway(cellchat)
+cellchat <- aggregateNet(cellchat)
+execution.time = Sys.time() - ptm
+print(as.numeric(execution.time, units = "secs"))
+
+# Compute the network centrality scores
+CellChatCTRL <- netAnalysis_computeCentrality(cellchat, slot.name = "netP") 
+netAnalysis_signalingRole_network(CellChatCTRL, signaling = "CXCL", width = 8, height = 2.5, font.size = 10)
+
+# Save CTRL CellChat Object
+saveRDS(CellChatCTRL, "Cellchat_Celltype_09012025_CTRL.rds")
+CellChatCTRL <- readRDS("Cellchat_Celltype_09012025_CTRL.rds")
+```
+
+### Stop threads
+```{r}
+future:::ClusterRegistry("stop")
+```
+
+
+## Merge 
+```{r}
+object.list <- list(PPFE = CellChatPPFE, CTRL = CellChatCTRL)
+cellchat <- mergeCellChat(object.list, add.names = names(object.list))
+#> Merge the following slots: 'data.signaling','images','net', 'netP','meta', 'idents', 'var.features' , 'DB', and 'LR'.
+cellchat
+execution.time = Sys.time() - ptm
+print(as.numeric(execution.time, units = "secs"))
+```
+
+```{r}
+ptm = Sys.time()
+gg1 <- compareInteractions(cellchat, show.legend = F, group = c(1,2))
+gg2 <- compareInteractions(cellchat, show.legend = F, group = c(1,2), measure = "weight")
+gg1 + gg2
+```
+
+```{r}
+ptm = Sys.time()
+cellchat <- netAnalysis_computeCentrality(cellchat, slot.name = "netP")
+par(mfrow = c(1,2), xpd=TRUE)
+netVisual_diffInteraction(cellchat, weight.scale = T)
+netVisual_diffInteraction(cellchat, weight.scale = T, measure = "weight")
+```
+
+```{r}
+saveRDS(cellchat, "PPFE_CTRL_Diff_Cellchat_merged.rds")
+```

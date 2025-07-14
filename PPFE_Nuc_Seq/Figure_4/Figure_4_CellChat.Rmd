@@ -1,0 +1,255 @@
+---
+title: "Differential_CellChatAnalysis"
+author: "Jannik Ruwisch"
+date: "2025-01-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T,
+                      fig.width = 14,
+                      fig.height = 7,
+                      #dpi = 1200,
+                      dev = "png",
+                      cache = F)
+```
+
+# Load libraries
+```{r}
+library(CellChat)
+library(patchwork)
+library(tidyseurat)
+library(Seurat)
+options(stringsAsFactors = FALSE)
+```
+
+# Choose Folder
+```{r}
+output_dir <-  choose.dir()
+```
+
+# Load Cellchat objects
+```{r}
+CellChatPPFE <- readRDS("./Cellchat_Celltype_09012025_CTRL.rds")
+CellChatCTRL <- readRDS("./Cellchat_Celltype_09012025_PPFE.rds")
+object.list <- list(PPFE = CellChatPPFE, CTRL = CellChatCTRL)
+cellchat <- mergeCellChat(object.list, add.names = names(object.list))
+cellchat <- netAnalysis_computeCentrality(cellchat, slot.name = "netP")
+```
+
+
+# Define Color Vectors 
+```{r}
+cell_colors <- c(
+  "Aberrant_Basaloid" = "#ff084a",
+  "Adventitial_Fb" = "#6A3D9A",
+  "Adventitial_like_Fb" = "#CAB2D6",
+  "AEC_intermediate" = "#8B8B60",
+  "AEC1" = "#199784",
+  "AEC2" = "#7F3C8D",
+  "Airway_Fb" = "#1F78B4",
+  "Alveolar_Fb" = "#A6CEE3",
+  "Alveolar_Macrophage" = "#FF6F00", # Updated
+  "B_Cells_memory" = "#FFED6F",
+  "B_Cells_naive" = "#D6EBB2",
+  "Basal" = "#A5AA99",
+  "CD4_TC_Cytotoxic" = "#D9B382",
+  "CD4_TC_effector" = "#D9D7C9",
+  "CD4_TC_naive" = "#E6F5B7",
+  "CD8_TC_effector_memory" = "#D8C965",
+  "CD8_TC_resident_memory" = "#C7D98C",
+  "Ciliated" = "#8BAC5C",
+  "Club" = "#715588",
+  "CTHRC1_MyoFb" = "#E31A1C",
+  "DC1" = "#94CABB", # Updated
+  "DC2" = "#1D5152", # Updated
+  "EC_aerocyte" = "#8491B4",
+  "EC_arterial" = "#F39B7F",
+  "EC_general_cap" = "#3C5488",
+  "EC_lymphatic" = "#00A087",
+  "EC_pulmonary_venous" = "#4DBBD5",
+  "EC_systemic_venous" = "#E64B35",
+  "Fibrotic_Macrophage" = "#BA4769", # Updated
+  "gamma_delta_TC" = "#F9CDE4",
+  "Goblet" = "#446293",
+  "IFNresp_Monocyte_derived_Macrophage" = "#B7BBC9", # Updated
+  "ILC3" = "#88ADCC",
+  "LangerhansCells" = "#3F4041", # Updated
+  "Macrophage_Cycling" = "#67549A", # Updated
+  "Mast" = "#CB1700", # Updated
+  "Mesothelium" = "#FDBF6F",
+  "Monocyte_Classical" = "#6A7998", # Updated
+  "Monocyte_derived_Macrophage" = "#BE777C", # Updated
+  "Monocyte_nonClassical" = "#BA7769", # Updated
+  "Neutro" = "#217885", # Updated
+  "NKCellsCD16_hi" = "#DED7DA",
+  "NKCellsCD16_lo" = "#C69FC7",
+  "pDC" = "#58644F", # Updated
+  "Pericytes" = "#33A02C",
+  "Plasma_Cells" = "#C2ADC0",
+  "Secretory" = "#CC831E",
+  "Smooth_Muscle" = "#B2DF8A",
+  "Subpleural_Fb" = "#FB9A99",
+  "Treg" = "#8DD3C7"
+)
+```
+
+# Define Lineage related celltypes
+```{r}
+myeloid_cells <- c(
+  "Alveolar_Macrophage",
+  "Fibrotic_Macrophage",
+  "IFNresp_Monocyte_derived_Macrophage",
+  "Macrophage_Cycling",
+  "Monocyte_Classical",
+  "Monocyte_derived_Macrophage",
+  "Monocyte_nonClassical",
+  "Neutro",
+  "DC1",
+  "DC2",
+  "pDC",
+  "Mast"
+)
+
+lymphocytes <- c(
+  "B_Cells_memory",
+  "B_Cells_naive",
+  "CD4_TC_Cytotoxic",
+  "CD4_TC_effector",
+  "CD4_TC_naive",
+  "CD8_TC_effector_memory",
+  "CD8_TC_resident_memory",
+  "gamma_delta_TC",
+  "ILC3",
+  "NKCellsCD16_hi",
+  "NKCellsCD16_lo",
+  "Treg"
+)
+
+cell_types <- c(
+  "Aberrant_Basaloid", "Adventitial_Fb", "Adventitial_like_Fb",
+  "AEC_intermediate", "AEC1", "AEC2",
+  "Airway_Fb", "Alveolar_Fb", "Alveolar_Macrophage",
+  "B_Cells_memory", "B_Cells_naive", "Basal",
+  "CD4_TC_Cytotoxic", "CD4_TC_effector", "CD4_TC_naive",
+  "CD8_TC_effector_memory", "CD8_TC_resident_memory", "Ciliated",
+  "Club", "CTHRC1_MyoFb", "DC1",
+  "DC2", "EC_aerocyte", "EC_arterial",
+  "EC_general_cap", "EC_lymphatic", "EC_pulmonary_venous",
+  "EC_systemic_venous", "Fibrotic_Macrophage", "gamma_delta_TC",
+  "Goblet", "IFNresp_Monocyte_derived_Macrophage", "ILC3",
+  "LangerhansCells", "Macrophage_Cycling", "Mast",
+  "Mesothelium", "Monocyte_Classical", "Monocyte_derived_Macrophage",
+  "Monocyte_nonClassical", "Neutro", "NKCellsCD16_hi",
+  "NKCellsCD16_lo", "pDC", "Pericytes",
+  "Plasma_Cells", "Secretory", "Smooth_Muscle",
+  "Subpleural_Fb", "Treg"
+)
+
+adventitials <- c("Adventitial_Fb",
+                  "Adventitial_like_Fb",
+                  "Subpleural_Fb")
+
+epithelial <- c("Aberrant_Basaloid","AEC_intermediate", "AEC1", "AEC2", "Club","Goblet", "Ciliated")
+```
+
+```{r}
+ptm = Sys.time()
+cellchat <- netAnalysis_computeCentrality(cellchat, slot.name = "netP")
+par(mfrow = c(1,2), xpd=TRUE)
+netVisual_diffInteraction(cellchat, weight.scale = T)
+netVisual_diffInteraction(cellchat, weight.scale = T, measure = "weight")
+```
+
+#===========
+
+# Interaction plots
+```{r}
+# Epi -> Fb
+pdf(file.path(output_dir,"Epi_CTHRC1_Crosstalk1.pdf"), width = 5, height = 5)
+par(mfrow = c(1,1), xpd=TRUE)
+  netVisual_circle(object.list[[1]]@net$weight,
+                   weight.scale = T, 
+                   label.edge= F, 
+                   #edge.weight.max = weight.max[2], 
+                   edge.width.max = 7,top = 1, 
+                   remove.isolate = T, vertex.label.cex = 0.7,arrow.size = 1.5, 
+                   targets.use = c("CTHRC1_MyoFb", adventitials),
+                   sources.use = c(epithelial),
+                   color.use = cell_colors,
+                 vertex.label.color = "white",   # Schriftfarbe
+                   title.name = paste0("Number of interactions - ", names(object.list)[1]))
+
+dev.off()
+
+# Fb -> Epi
+pdf(file.path(output_dir,"Epi_CTHRC1_Crosstalk2.pdf"), width = 5, height =5)
+par(mfrow = c(1,1), xpd=TRUE)
+  netVisual_circle(object.list[[1]]@net$weight,
+                   weight.scale = T, 
+                   label.edge= F, 
+                  # edge.weight.max = weight.max[2], 
+                   edge.width.max = 7,top = 1, 
+                   remove.isolate = T, vertex.label.cex = 0.7,arrow.size = 1.5, 
+                   sources.use = c("CTHRC1_MyoFb", adventitials),
+                   targets.use = c(epithelial),
+                   color.use = cell_colors,
+                  vertex.label.color = "white", 
+                   title.name = paste0("Number of interactions - ", names(object.list)[1]))
+
+dev.off()
+```
+
+# Aberrant_Basaloid <-> CTHRC1_MyoFb
+```{r, fig.width=14}
+# Parthways
+pdf(file.path(output_dir,"Epi_to_CTHRC1_PATHWAYS.pdf"), width = 7, height =7)
+par(mfrow = c(1, 1), xpd=TRUE)
+# compare all the interactions sending from Inflam.FIB to DC cells
+netVisual_chord_gene(object.list[[1]], 
+                     sources.use = c("Aberrant_Basaloid","CTHRC1_MyoFb"), 
+                     targets.use = c("Aberrant_Basaloid","CTHRC1_MyoFb"),slot.name = "netP",
+                     color.use = cell_colors, show.legend = F, 
+                      big.gap = 5,thresh = 0.05, small.gap = 3,
+                      lab.cex = 0.5)# title.name = paste0("COLLAGEN -", names(object.list)[1]))
+
+dev.off()
+
+# Collagen
+pdf(file.path(output_dir,"Epi_CTHRC1_COLLAGEN.pdf"), width = 5, height = 5)
+par(mfrow = c(1, 1), xpd=TRUE)
+# compare all the interactions sending from Inflam.FIB to DC cells
+netVisual_chord_gene(object.list[[1]], sources.use = c("Aberrant_Basaloid", "CTHRC1_MyoFb"), 
+                     targets.use = c("Aberrant_Basaloid", "CTHRC1_MyoFb"), 
+                     color.use = cell_colors, show.legend = F, 
+                     signaling = "COLLAGEN", big.gap = 5,thresh = 0.05,
+                      lab.cex = 0.5)# title.name = paste0("COLLAGEN -", names(object.list)[1]))
+
+dev.off()
+
+# FN1
+pdf(file.path(output_dir,"Epi_CTHRC1_FN1.pdf"), width = 5, height = 5)
+
+par(mfrow = c(1, 1), xpd=TRUE)
+# compare all the interactions sending from Inflam.FIB to DC cells
+netVisual_chord_gene(object.list[[1]], sources.use = c("Aberrant_Basaloid", "CTHRC1_MyoFb"), 
+                     targets.use = c("Aberrant_Basaloid", "CTHRC1_MyoFb"), 
+                     color.use = cell_colors, show.legend = F, 
+                     signaling = "FN1", big.gap = 5,thresh = 0.5,
+                      lab.cex = 0.5)# title.name = paste0("COLLAGEN -", names(object.list)[1]))
+
+dev.off()
+
+#THBS
+pdf(file.path(output_dir,"Epi_CTHRC1_THBS.pdf"), width = 5, height = 5)
+
+par(mfrow = c(1, 1), xpd=TRUE)
+# compare all the interactions sending from Inflam.FIB to DC cells
+netVisual_chord_gene(object.list[[1]], sources.use = c("Aberrant_Basaloid", "CTHRC1_MyoFb"), 
+                     targets.use = c("Aberrant_Basaloid", "CTHRC1_MyoFb"), 
+                     color.use = cell_colors, show.legend = F, 
+                     signaling = "THBS", big.gap = 5,thresh = 0.05,
+                      lab.cex = 0.5)# title.name = paste0("COLLAGEN -", names(object.list)[1]))
+
+dev.off()
+```

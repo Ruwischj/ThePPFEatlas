@@ -1,0 +1,241 @@
+---
+title: "PPFE_Batch_integration"
+author: "Jannik_Ru"
+date: "2024-10-03"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T,
+                      fig.width = 14,
+                      fig.height = 7,
+                      dpi = 300,
+                      dev = "png",
+                      cache = F)
+```
+
+# Packages
+```{r}
+library(SCP)
+library(Seurat)
+library(SeuratObject)
+library(dplyr)
+library(tidyverse)
+library(tidyseurat)
+library(viridis)
+library(RColorBrewer)
+library(scales)
+library(circlize)
+library(monocle3)
+library(ComplexHeatmap)
+library(cowplot)
+```
+
+
+# Read in batch 1
+```{r}
+# Reads in the cleaned dataset from Batch 1 (Hannover - Germany only)
+PPFE_Batch1 <- readRDS("./PPFE_list_Batch1_Han_03.10.2024.rds") 
+
+PPFE_Batch1 <- PPFE_Batch1 %>%
+  mutate(Batch = "Batch1",
+         Cohort = "Germany")
+```
+
+# Read in batch 2 
+```{r}
+PPFE_Batch2 <- readRDS("/mnt/dzl_bioinf/ruwischj/scRNA_Seq/PPFE_Nuclei_Seq/PPFE_Batch_2_french/PPFE_CTRL_batch2_Han_French_norm_scaled.03.10.2024.rds") # should be the list of cleaned but unintegrated RDS-Objects
+
+PPFE_Batch2 <- PPFE_Batch2 %>%
+  mutate(Batch = "Batch2")
+```
+
+# Append lists
+```{r}
+PPFE.list <- c(PPFE_Batch1, PPFE_Batch2)
+rm(PPFE_Batch1)
+rm(PPFE_Batch2)
+```
+
+# Get Metadata
+```{r}
+# Create an empty data frame for merged metadata
+merged_metadata <- data.frame()
+
+# Loop through the list, extract, and merge metadata
+for(i in 1:length(PPFE.list)) {
+  # Extract metadata
+  metadata <- PPFE.list[[i]]@meta.data
+  
+ 
+  # Merge with the main metadata data frame
+  merged_metadata <- rbind(merged_metadata, metadata)
+}
+```
+
+# Integration
+
+## Normalize + HVF 
+```{r}
+PPFE.list <- lapply(X = PPFE.list, FUN = function(x) {
+    x <- NormalizeData(x, verbose = FALSE)
+    x <- FindVariableFeatures(x, verbose = FALSE, nfeatures = 2000)
+})
+```
+## Scale and PCA
+```{r}
+features <- SelectIntegrationFeatures(object.list = PPFE.list, nfeatures = 2000)
+
+## remove mito genes as integrator
+features <- features[!grepl("MT-", features)]
+```
+
+
+```{r}
+PPFE.list <- lapply(X = PPFE.list, FUN = function(x) {
+    x <- ScaleData(x, features = features, vars.to.regress = c("nCount_RNA"), verbose = FALSE)
+    x <- RunPCA(x, features = features, verbose = FALSE)
+})
+```
+
+## Find RPCA Anchors
+```{r}
+anchors <- FindIntegrationAnchors(object.list = PPFE.list, reduction = "rpca", dims = 1:50)
+```
+
+## RPCA integration
+```{r}
+ppfe.rpca.integrated_clean <- IntegrateData(anchorset = anchors, dims = 1:50)
+saveRDS(ppfe.rpca.integrated_clean, "PPFE_b1_b2_rpca.int.clean_04102024_unnorm.rds")
+```
+
+```{r}
+ppfe.rpca.integrated_clean <- ScaleData(bos.rpca.integrated_clean, vars.to.regress="percent.mt")
+ppfe.rpca.integrated_clean <- RunPCA(ppfe.rpca.integrated_clean, verbose = FALSE)
+ppfe.rpca.integrated_clean <- RunUMAP(ppfe.rpca.integrated_clean, dims = 1:50)
+```
+
+
+```{r}
+ppfe.rpca.integrated_clean <- RunCellQC(ppfe.rpca.integrated_clean, assay = "RNA", qc_metrics = c("doublets"))
+```
+
+```{r}
+DimPlot(ppfe.rpca.integrated_clean, group.by = "CellQC", raster = F)
+```
+
+## SaveRDS post integration
+```{r}
+saveRDS(ppfe.rpca.integrated_clean, "ppfe.rpca.integrated_feat_cts_cleaned_12_03_2024.rds")
+```
+
+```{r}
+# Data needs to be rescald with "percent.mt to be regressed out... -> the 
+ppfe.rpca.integrated_clean <- readRDS("/mnt/dzl_bioinf/ruwischj/scRNA_Seq/PPFE_Nuclei_Seq/PPFE_Batch_integration/ppfe.rpca.integrated_feat_cts_cleaned_12_03_2024.rds")
+```
+
+```{r}
+ppfe.rpca.integrated_clean <- ScaleData(ppfe.rpca.integrated_clean, 
+                                        vars.to.regress="percent.mt")
+
+ppfe.rpca.integrated_clean <- RunPCA(ppfe.rpca.integrated_clean, 
+                                     verbose = FALSE)
+
+ppfe.rpca.integrated_clean <- RunUMAP(ppfe.rpca.integrated_clean, 
+                                      dims = 1:50)
+```
+
+
+```{r}
+
+DimPlot(ppfe.rpca.integrated_clean, group.by = "CellQC", raster = F, reduction = "umap", shuffle = T)
+```
+
+
+# QC
+```{r, fig.height=7, fig.width=14}
+VlnPlot(ppfe.rpca.integrated_clean, group.by = "orig.ident", features = c("nFeature_RNA","nCount_RNA","percent.mt"), ncol = 3, pt.size = 0, raster = F, combine = F)
+
+```
+```{r}
+CellStatPlot(srt = ppfe.rpca.integrated_clean, stat.by = "db_qc", group.by = "orig.ident", label = TRUE)
+```
+```{r}
+ppfe.rpca.integrated_clean <- RunCellQC(
+  ppfe.rpca.integrated_clean,
+  assay = "RNA",
+  qc_metrics = c(
+    #"doublets", 
+    "outlier", 
+    "umi", 
+    "gene", 
+    "mito", 
+    "ribo", 
+    "ribo_mito_ratio",
+    "species"),
+  return_filtered = FALSE,
+  #db_method = "scDblFinder",
+  #db_rate = ncol(srt)/1000 * 0.01,
+  outlier_threshold = c("log10_nCount:lower:2.5", "log10_nCount:higher:5",
+    "log10_nFeature:lower:2.5", "log10_nFeature:higher:5", "featurecount_dist:lower:2.5"),
+  outlier_n = 1,
+  UMI_threshold = 100, # counts
+  gene_threshold = 100, # Features
+  mito_threshold = 20, # percent mt
+  mito_pattern = c("MT-", "Mt-", "mt-"),
+  mito_gene = NULL,
+  ribo_threshold = 50,
+  ribo_pattern = c("RP[SL]\\d+\\w{0,1}\\d*$", "Rp[sl]\\d+\\w{0,1}\\d*$","rp[sl]\\d+\\w{0,1}\\d*$"),
+  ribo_gene = NULL,
+  ribo_mito_ratio_range = c(1, Inf),
+  species = NULL,
+  species_gene_prefix = NULL,
+  species_percent = 95,
+  seed = 11)
+```
+
+```{r}
+CellStatPlot(srt = ppfe.rpca.integrated_clean, stat.by = "ribo_mito_ratio_qc", group.by = "orig.ident", label = TRUE)
+CellStatPlot(srt = ppfe.rpca.integrated_clean, stat.by = "outlier_qc", group.by = "orig.ident", label = TRUE)
+```
+
+```{r, fig.height=4}
+VlnPlot(ppfe.rpca.integrated_clean, features = c("nFeature_RNA","nCount_RNA","percent.mt"), 
+        group.by = "orig.ident", ncol = 3, pt.size = 0)
+```
+
+```{r}
+DimPlot(ppfe.rpca.integrated_clean, group.by = c("Cohort", "Batch"), shuffle = T, raster = F, combine = F, reduction = "umap")
+```
+
+```{r}
+CellDimPlot(ppfe.rpca.integrated_clean, group.by = "Seuratclusters", raster = F)
+CellDimPlot(ppfe.rpca.integrated_clean, group.by = "disease.ident", raster = F, 
+            palcolor = c("royalblue", "red3"), reduction = "umap")
+```
+
+```{r}
+FeatureDimPlot(ppfe.rpca.integrated_clean, features = c("CD4", "CD8A", "JCHAIN", "KRT5", "SFTPC") , raster = F, assay = "RNA", combine = F, reduction = "umap")
+```
+
+# Add Cluster
+```{r}
+DefaultAssay(ppfe.rpca.integrated_clean) <- "Integrated"
+ppfe.rpca.integrated_clean <- FindNeighbors(ppfe.rpca.integrated_clean, reduction = "pca", dims = 1:50)
+ppfe.rpca.integrated_clean <- FindClusters(ppfe.rpca.integrated_clean, resolution = c(0.2,0.6,1))
+```
+
+
+# Check_Dimplot
+```{r}
+CellDimPlot(ppfe.rpca.integrated_clean, group.by = "disease.ident", raster = F, reduction = "umap") | CellDimPlot(ppfe.rpca.integrated_clean, group.by = "orig.ident", raster = F, reduction = "umap")
+CellDimPlot(ppfe.rpca.integrated_clean, group.by = c("Seuratcorrected_snn_res.1"), raster = F, reduction = "umap") 
+CellDimPlot(ppfe.rpca.integrated_clean, group.by = c("Seuratcorrected_snn_res.0.6"), raster = F, reduction = "umap")
+CellDimPlot(ppfe.rpca.integrated_clean, group.by = c("Seuratcorrected_snn_res.0.2"), raster = F, reduction = "umap")
+FeatureDimPlot(ppfe.rpca.integrated_clean, features = c("EPCAM", "CDKN1A"), raster = F, assay = "RNA", reduction = "umap")
+```
+
+# SaveRDS
+```{r}
+saveRDS(ppfe.rpca.integrated_clean, "Merged_Dataset_B1_B2_ppfe.rpca.integrated_RPCA_cleaned_07_10_2024.rds")
+```

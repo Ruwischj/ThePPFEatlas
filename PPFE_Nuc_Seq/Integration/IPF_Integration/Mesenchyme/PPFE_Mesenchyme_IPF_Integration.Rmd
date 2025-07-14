@@ -1,0 +1,831 @@
+---
+title: "PPFE_integrated_b1_b2_epithelium"
+author: "Jannik Ruwisch"
+date: "2024-10-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T,
+                      fig.width = 14,
+                      fig.height = 7,
+                      #dpi = 1200,
+                      dev = "png",
+                      cache = F)
+```
+
+```{r}
+library(SCP)
+library(Seurat)
+library(SeuratObject)
+library(dplyr)
+library(tidyverse)
+library(tidyseurat)
+library(ggpubr)
+library(data.table)
+library(magrittr)
+
+```
+
+# Load_Dataset
+```{r}
+PPFE_epi <- readRDS("PPFE_Mes_Lineage_raw.rds") #cave heißt nur epi um Skript nicht zu ändern !
+```
+
+```{r}
+## extract meta data
+md <- PPFE_epi@meta.data %>% as.data.table
+md[, .N, by = c("orig.ident")]
+min(table(PPFE_epi$orig.ident))
+```
+# Perform Re-Embedding and ReClustering
+```{r}
+# Set the default assay to "RNA"
+DefaultAssay(PPFE_epi) <- "RNA"
+
+# Create Subject List for integration
+PPFE_epi.list <- SplitObject(PPFE_epi, split.by = "orig.ident")
+
+# FindVarFeatures to increase feature sensitivity in the subset
+PPFE_epi.list <- lapply(X = PPFE_epi.list, FUN = function(x) {
+    x <- NormalizeData(x, verbose = FALSE)
+    x <- FindVariableFeatures(x, verbose = FALSE, nfeatures = 2000)
+})
+
+features <- SelectIntegrationFeatures(object.list = PPFE_epi.list)
+
+## remove mito genes as integrator
+features <- features[-grep("MT-", features)]
+
+PPFE_epi.list <- lapply(X = PPFE_epi.list, FUN = function(x) {
+    x <- ScaleData(x, features = features, vars.to.regress = c("nCount_RNA"), verbose = FALSE)
+    x <- RunPCA(x, features = features, verbose = FALSE, npcs = 50) # 50 Dims did not work out
+})
+
+# Find Integration anchors
+anchors <- FindIntegrationAnchors(object.list = PPFE_epi.list, reduction = "rpca", dims = 1:50, # 1:30, k.filter = 90
+                                  )
+```
+
+# A) RPCA integration
+```{r}
+PPFE_Epi_int <- IntegrateData(anchorset = anchors#, k.weight = 40
+                             )
+```
+
+### Reclustering
+```{r}
+PPFE_Epi_int <- ScaleData(PPFE_Epi_int, verbose = FALSE,  vars.to.regress="percent.mt")
+PPFE_Epi_int <- RunPCA(PPFE_Epi_int, verbose = FALSE, npcs = 100)
+PPFE_Epi_int <- RunUMAP(PPFE_Epi_int, dims = 1:50)
+PPFE_Epi_int <- FindNeighbors(PPFE_Epi_int, reduction = "pca", dims = 1:100)
+PPFE_Epi_int <- FindClusters(PPFE_Epi_int, resolution = 2)
+```
+
+### QC
+```{r}
+CellDimPlot(PPFE_Epi_int, group.by = c("Celltype_ID", "integrated_snn_res.2"), combine = T, label = T, label_insitu = T)
+CellDimPlot(PPFE_Epi_int, group.by = c("integrated_snn_res.2", "orig.ident"), combine = T)
+FeatureDimPlot(PPFE_Epi_int, features = c("nCount_RNA", "nFeature_RNA", "percent.mt"))
+```
+
+### Embedding
+```{r, fig.width=10, fig.height=5}
+CellDimPlot(PPFE_Epi_int, group.by = c("integrated_snn_res.2"), reduction = "ReUMAP_50", combine = T, label_insitu = T, label = T)
+```
+
+### DEGs
+```{r}
+PPFE_Epi_int <- RunDEtest(srt = PPFE_Epi_int, group_by = "integrated_snn_res.2", fc.threshold = 2, only.pos = T, assay = "RNA")
+```
+```{r}
+DEGs_Epi <- PPFE_Epi_int@tools$DEtest_integrated_snn_res.2$AllMarkers_wilcox
+```
+```{r}
+DEGs_Epi <- DEGs_Epi[with(DEGs_Epi, avg_log2FC > 0.3 & p_val_adj < 0.05), ] 
+
+DEGs_Epi <- DEGs_Epi %>%
+  group_by(group1) %>%
+  slice_max(n = 100, order_by = avg_log2FC)
+writexl::write_xlsx(DEGs_Epi, "DEGs_Mes_top100_SNN_2_PPFE.xlsx")
+```
+
+```{r}
+knitr::include_graphics("Cleaning_1.png")
+```
+
+### Cleaning
+```{r}
+# 
+PPFE_Epi_int_clean <- subset(PPFE_Epi_int, integrated_snn_res.2 != 16 & 
+                              integrated_snn_res.2 != 20 & 
+                              integrated_snn_res.2 != 23 & 
+                              integrated_snn_res.2 != 25 & 
+                              integrated_snn_res.2 != 26 & 
+                              integrated_snn_res.2 != 28 & 
+                              integrated_snn_res.2 != 31 & 
+                              integrated_snn_res.2 != 32 & 
+                              integrated_snn_res.2 != 33 & 
+                              integrated_snn_res.2 != 38 & 
+                              integrated_snn_res.2 != 39 & 
+                              integrated_snn_res.2 != 5 & 
+                              integrated_snn_res.2 != 29)
+
+CellDimPlot(PPFE_Epi_int_clean, group.by = "integrated_snn_res.2",label = T, label_insitu = T)
+```
+
+#==================================================
+
+# B) RPCA integratation: Cleaning Step 2
+```{r}
+# find smallest dataset
+min(table(PPFE_Epi_int_clean$orig.ident))
+```
+
+```{r}
+# Set the default assay to "RNA"
+DefaultAssay(PPFE_Epi_int_clean) <- "RNA"
+
+# Create Subject List for integration
+PPFE_Epi.list <- SplitObject(PPFE_Epi_int_clean, split.by = "orig.ident")
+
+PPFE_Epi.list <- lapply(X = PPFE_Epi.list, FUN = function(x) {
+    x <- NormalizeData(x, verbose = FALSE)
+    x <- FindVariableFeatures(x, verbose = FALSE, nfeatures = 2000)
+})
+
+features <- SelectIntegrationFeatures(object.list = PPFE_Epi.list)
+
+## remove mito genes as integrator
+features <- features[-grep("MT-", features)]
+
+PPFE_Epi.list <- lapply(X = PPFE_Epi.list, FUN = function(x) {
+    x <- ScaleData(x, features = features, vars.to.regress = c("nCount_RNA"), verbose = FALSE)
+    x <- RunPCA(x, features = features, verbose = FALSE, npcs = 50) # 50 Dims did not work out
+})
+
+# Find Integration anchors
+anchors <- FindIntegrationAnchors(object.list = PPFE_Epi.list, reduction = "rpca", dims = 1:50#, k.filter = 90
+                                  )
+```
+
+## RPCA integration
+```{r}
+PPFE_Epi._int_clean2 <-IntegrateData(anchorset = anchors, k.weight = 90)
+```
+
+### Reclustering
+```{r}
+PPFE_Epi._int_clean2 <- ScaleData(PPFE_Epi._int_clean2, verbose = FALSE, vars.to.regress="percent.mt")
+PPFE_Epi._int_clean2 <- RunPCA(PPFE_Epi._int_clean2, verbose = FALSE, npcs = 100)
+PPFE_Epi._int_clean2 <- RunUMAP(PPFE_Epi._int_clean2, dims = 1:100)
+PPFE_Epi._int_clean2 <- FindNeighbors(PPFE_Epi._int_clean2, reduction = "pca", dims = 1:100)
+PPFE_Epi._int_clean2 <- FindClusters(PPFE_Epi._int_clean2, resolution = 2)
+```
+
+### UMAP Resolutions
+```{r, fig.width=14}
+PPFE_Epi._int_clean2 <- RunUMAP2(object = PPFE_Epi._int_clean2, dims = 1:100, reduction = "pca", reduction.name = "ReUMAP_100", reduction.key = "ReUMAP_100")
+PPFE_Epi._int_clean2 <- RunUMAP2(object = PPFE_Epi._int_clean2, dims = 1:75, reduction = "pca", reduction.name = "ReUMAP_75", reduction.key = "ReUMAP_75")
+PPFE_Epi._int_clean2 <- RunUMAP2(object = PPFE_Epi._int_clean2, dims = 1:50, reduction = "pca", reduction.name = "ReUMAP_50", reduction.key = "ReUMAP_50")
+PPFE_Epi._int_clean2 <- RunUMAP2(object = PPFE_Epi._int_clean2, dims = 1:30, reduction = "pca", reduction.name = "ReUMAP_30", reduction.key = "ReUMAP_30")
+PPFE_Epi._int_clean2 <- RunUMAP2(object = PPFE_Epi._int_clean2, dims = 1:15, reduction = "pca", reduction.name = "ReUMAP_15", reduction.key = "ReUMAP_15")
+PPFE_Epi._int_clean2 <- RunUMAP2(object = PPFE_Epi._int_clean2, dims = 1:10, reduction = "pca", reduction.name = "ReUMAP_10", reduction.key = "ReUMAP_10")
+PPFE_Epi._int_clean2 <- RunUMAP2(object = PPFE_Epi._int_clean2, dims = 1:8, reduction = "pca", reduction.name = "ReUMAP_08", reduction.key = "ReUMAP_08")
+PPFE_Epi._int_clean2 <- RunUMAP2(object = PPFE_Epi._int_clean2, dims = 1:7, reduction = "pca", reduction.name = "ReUMAP_07", reduction.key = "ReUMAP_07")
+PPFE_Epi._int_clean2 <- RunUMAP2(object = PPFE_Epi._int_clean2, dims = 1:5, reduction = "pca", reduction.name = "ReUMAP_05", reduction.key = "ReUMAP_05")
+```
+### QC
+```{r}
+CellDimPlot(PPFE_Epi._int_clean2, group.by = c("Celltype_ID", "integrated_snn_res.2"), reduction = "ReUMAP_100", combine = T, label = T, label_insitu = T)
+CellDimPlot(PPFE_Epi._int_clean2, group.by = c("integrated_snn_res.2", "orig.ident"), reduction = "ReUMAP_100", combine = F, label_insitu = T, label = T)
+FeatureDimPlot(PPFE_Epi._int_clean2, features = c("nCount_RNA", "nFeature_RNA", "percent.mt"))
+
+CellDimPlot(PPFE_Epi._int_clean2, group.by = c("Celltype_ID", "integrated_snn_res.2"), reduction = "ReUMAP_100", combine = T, label = T, label_insitu = T)
+Seurat::DimPlot(PPFE_Epi._int_clean2, group.by = c("disease.ident", "integrated_snn_res.2"), combine = T, label = T, shuffle = T)
+
+CellDimPlot(PPFE_Epi._int_clean2, group.by = c("integrated_snn_res.2", "orig.ident"), reduction = "ReUMAP_100", combine = F, label_insitu = T, label = T)
+FeatureDimPlot(PPFE_Epi._int_clean2, features = c("nCount_RNA", "nFeature_RNA", "percent.mt", "PTPRC"), nrow = 2, reduction = "ReUMAP_100", assay = "RNA")
+```
+
+### DEGs
+```{r}
+PPFE_Epi._int_clean2 <- RunDEtest(srt = PPFE_Epi._int_clean2, group_by = "integrated_snn_res.2", fc.threshold = 3, only.pos = T, assay = "RNA")
+```
+```{r}
+PPFE_Imm.Epi_marker <- PPFE_Epi._int_clean2@tools$DEtest_integrated_snn_res.2$AllMarkers_wilcox
+PPFE_Imm.Epi_marker
+```
+```{r}
+PPFE_Imm.Epi_marker <- PPFE_Imm.Epi_marker[with(PPFE_Imm.Epi_marker, avg_log2FC > 0.3 & p_val_adj < 0.05), ]
+
+PPFE_Imm.Epi_marker <- PPFE_Imm.Epi_marker %>%
+  group_by(group1) %>%
+  slice_max(n = 100, order_by = avg_log2FC)
+writexl::write_xlsx(PPFE_Imm.Epi_marker, "PPFE_DEGs_Mes_cleaned_round_2_top100_SNN_2_Nr2.xlsx")
+```
+
+### cleaning
+```{r}
+knitr::include_graphics("Cleaning_2.png")
+```
+
+```{r}
+PPFE_Epi._int_clean3 <- subset(PPFE_Epi._int_clean2, integrated_snn_res.2 != 24 & 
+                              integrated_snn_res.2 != 26 & 
+                              integrated_snn_res.2 != 27 & 
+                              integrated_snn_res.2 != 29 & 
+                              integrated_snn_res.2 != 30 & 
+                              integrated_snn_res.2 != 33 & 
+                              integrated_snn_res.2 != 34 & 
+                              integrated_snn_res.2 != 36 & 
+                              integrated_snn_res.2 != 38 & 
+                              integrated_snn_res.2 != 39 & 
+                              integrated_snn_res.2 != 41 & 
+                              integrated_snn_res.2 != 42 &
+                              integrated_snn_res.2 != 45 & 
+                              integrated_snn_res.2 != 46 & 
+                              integrated_snn_res.2 != 47 & 
+                              integrated_snn_res.2 != 48)
+
+CellDimPlot(PPFE_Epi._int_clean3, group.by = "integrated_snn_res.2",label = T, label_insitu = T)
+```
+
+#=======================
+# C) RPCA integratation: Cleaning Step 3
+
+
+```{r}
+# Set the default assay to "RNA"
+DefaultAssay(PPFE_Epi._int_clean3) <- "RNA"
+
+# Create Subject List for integration
+PPFE_mes.list <- SplitObject(PPFE_Epi._int_clean3, split.by = "orig.ident")
+```
+
+
+```{r}
+PPFE_mes.list <- lapply(X = PPFE_mes.list, FUN = function(x) {
+    x <- NormalizeData(x, verbose = FALSE)
+    x <- FindVariableFeatures(x, verbose = FALSE, nfeatures = 2000)
+})
+
+features <- SelectIntegrationFeatures(object.list = PPFE_mes.list)
+
+## remove mito genes as integrator
+features <- features[-grep("MT-", features)]
+
+PPFE_mes.list <- lapply(X = PPFE_mes.list, FUN = function(x) {
+    x <- ScaleData(x, features = features, vars.to.regress = c("nCount_RNA"), verbose = FALSE)
+    x <- RunPCA(x, features = features, verbose = FALSE, npcs = 50) # 50 Dims did not work out
+})
+
+# Find Integration anchors
+anchors <- FindIntegrationAnchors(object.list = PPFE_mes.list, reduction = "rpca", dims = 1:50
+                                  )
+```
+
+
+### RPCA integration
+```{r}
+PPFE_mes_int <-IntegrateData(anchorset = anchors, k.weight = 90
+                                   )
+
+
+```
+
+### Reclustering
+```{r}
+PPFE_mes_int <- ScaleData(PPFE_mes_int, verbose = FALSE, vars.to.regress="percent.mt")
+PPFE_mes_int <- RunPCA(PPFE_mes_int, verbose = FALSE, npcs = 100)
+PPFE_mes_int <- RunUMAP(PPFE_mes_int, dims = 1:100)
+PPFE_mes_int <- FindNeighbors(PPFE_mes_int, reduction = "pca", dims = 1:100)
+PPFE_mes_int <- FindClusters(PPFE_mes_int, resolution = 2)
+PPFE_mes_int <- FindClusters(PPFE_mes_int, resolution = 1)
+```
+
+### Rename Clusters
+```{r}
+PPFE_mes_int <- SCP::RenameClusters(PPFE_mes_int, group.by = "integrated_snn_res.1", 
+                                        nameslist = c("Alveolar_Fb", #0
+                                                      "Alveolar_Fb", #1
+                                                      "Peribronchial_Fb", #10
+                                                      "Subpleural_Fb", # 11
+                                                      "Smooth_Muscle", #12 # 
+                                                      "Smooth_Muscle", # 13
+                                                      "Schrott", # 14 # Immune Contamination from Myeloids
+                                                      "Schrott", # 15 Immune Contamination
+                                                      "Alveolar_Fb", #16
+                                                      "Mesothelium",  # 17
+                                                      "Alveolar_Fb", # 18
+                                                      "Alveolar_Fb", # 19
+                                                      "Alveolar_Fb", # 2
+                                                      "Alveolar_Fb", # 20
+                                                      "Alveolar_Fb", # 21
+                                                      "Alveolar_Fb", # 22
+                                                      "Alveolar_Fb", # 23
+                                                      "Alveolar_Fb", #24
+                                                      "CTHRC1_low_MyoFb",# 25
+                                                      "Alveolar_Fb", # 26
+                                                     "Alveolar_Fb", # 27
+                                                     "Schrott", # 28
+                                                     "Alveolar_Fb", # 29
+                                                     "CTHRC1_hi_MyoFb", # 3
+                                                     "Adventitial_Fb", #4
+                                                     "Pericytes", # 5
+                                                     "CEMIP_Alveolar_Fb", # 6
+                                                     "Smooth_Muscle", # 7
+                                                      "ASTN_Alveolar_Fb", # 8 # ! CAVE LEPR & ASTN ! 
+                                                     "CTHRC1_low_MyoFb" # 9 
+                                                     ), 
+                                        name = "Celltype_ID_fine") 
+
+PPFE_mes_int <- SCP::RenameClusters(PPFE_mes_int, group.by = "integrated_snn_res.1", 
+                                        nameslist = c("Alveolar_Fb", #0
+                                                      "Alveolar_Fb", #1
+                                                      "Peribronchial_Fb", #10
+                                                      "Subpleural_Fb", # 11
+                                                      "Smooth_Muscle", #12 # 
+                                                      "Smooth_Muscle", # 13
+                                                      "Schrott", # 14 # Immune Contamination from Myeloids
+                                                      "Schrott", # 15 Immune Contamination
+                                                      "Alveolar_Fb", #16
+                                                      "Mesothelium",  # 17
+                                                      "Alveolar_Fb", # 18
+                                                      "Alveolar_Fb", # 19
+                                                      "Alveolar_Fb", # 2
+                                                      "Alveolar_Fb", # 20
+                                                      "Alveolar_Fb", # 21
+                                                      "Alveolar_Fb", # 22
+                                                      "Alveolar_Fb", # 23
+                                                      "Alveolar_Fb", #24
+                                                      "MyoFb",# 25
+                                                      "Alveolar_Fb", # 26
+                                                     "Alveolar_Fb", # 27
+                                                     "Schrott", # 28
+                                                     "Alveolar_Fb", # 29
+                                                     "MyoFb", # 3
+                                                     "Adventitial_Fb", #4
+                                                     "Pericytes", # 5
+                                                     "Alveolar_Fb", # 6
+                                                     "Smooth_Muscle", # 7
+                                                      "Alveolar_Fb", # 8 #
+                                                     "MyoFb" # 9 
+                                                     ), 
+                                        name = "Celltype_ID_coarse") 
+```
+
+
+### Last Cleaning
+```{r}
+# remove Junk
+PPFE_mes_int_clean <- subset(PPFE_mes_int, Celltype_ID_fine != "Schrott")
+
+# Drop metadata levels
+PPFE_mes_int_clean@meta.data$Celltype_ID_fine <- droplevels(PPFE_mes_int_clean@meta.data$Celltype_ID_fine)
+PPFE_mes_int_clean@meta.data$Celltype_ID_coarse <- droplevels(PPFE_mes_int_clean@meta.data$Celltype_ID_coarse)
+
+# Save
+saveRDS(PPFE_mes_int_clean, "PPFE_Mes_Final_noIPF.rds")
+```
+
+#==================================================
+
+# D.) Integrate with IPF
+
+### Load IPF data
+```{r}
+IPF_raw <- load("./IPF_snRNAseq_Data_Mesenchyme.Robj") # GSE286182
+IPF_raw <- UpdateSeuratObject(epi_3ways.clean)
+rm(epi_3ways.clean)
+Version(IPF_raw)
+IPF_clean <- subset(IPF_raw, disease.ident == "IPF")
+rm(IPF_raw)
+# Adjust orig.ident
+IPF_clean$orig.ident <- factor(IPF_clean$subject.ident)
+IPF_clean@meta.data$orig.ident %>% droplevels()
+IPF_clean <- IPF_clean %>%
+  mutate(orig.ident = paste0("IPFnuc", "_", orig.ident))
+IPF_clean$orig.ident %>% unique()
+# Adjust disease ident
+IPF_clean$disease.ident %>% unique()
+table(IPF_clean$orig.ident, IPF_clean$disease.ident)
+```
+
+### Load PPFE data
+```{r}
+PPFE_Mes_int_final <- readRDS("PPFE_Mes_Final_noIPF.rds")
+CellDimPlot(IPF_clean, group.by = "renamedFinal", raster = F, label = T, label_insitu = T)
+CellDimPlot(IPF_clean, group.by = "orig.ident", raster = F, label = F, label_insitu = F, legend.position = "none")
+CellDimPlot(IPF_clean, group.by = "disease.ident", raster = F, label = F, label_insitu = F)
+```
+
+## Adjust the gene annotation among datasets
+```{r}
+###########
+# translate human gene to mouse and vice versa
+library(biomaRt)
+# GRCh38.p12 (this is what i mapped against) is Ensemble97 (July 2019)
+listEnsemblArchives()
+# http://jul2019.archive.ensembl.org
+# listDatasets(useMart("ensembl", host="http://jul2019.archive.ensembl.org"))
+
+ensembl <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl")
+
+# get all possible genetypes for trannslation among databases
+allfilters <- filterOptions("biotype",ensembl)
+
+# human_mart_IPF_optA
+ensembl_103 <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", host = "https://feb2021.archive.ensembl.org")
+ensembl_genes_103 <- getBM(attributes = c('ensembl_gene_id', 'hgnc_symbol', 'external_gene_name', 'gene_biotype'),
+                         filters = 'biotype', 
+                         values = allfilters,
+                         mart = ensembl_103)
+
+# PPFE 10X Version
+ensembl_98 <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", host = "https://sep2019.archive.ensembl.org")
+ensembl_genes_98 <- getBM(attributes = c('ensembl_gene_id', 'hgnc_symbol', 'external_gene_name', 'gene_biotype'),
+                         filters = 'biotype', 
+                         values = allfilters,
+                         mart = ensembl_98)
+
+# Check on DIfferences among ensembl versions
+match_genes <- function(ipf_genes, ensembl_genes) {
+  # irect matching
+  common_genes <- ipf_genes[ipf_genes %in% ensem$external_gene_name]
+  missing_genes <- ipf_genes[!ipf_genes %in% ensembl_genes$external_gene_name]
+  
+  # Correct "-" to "_" and check again
+  corrected_genes <- gsub("-", "_", missing_genes)
+  common_genes_corrected <- corrected_genes[corrected_genes %in% ensembl_genes$external_gene_name]
+  missing_genes_after_correction <- corrected_genes[!corrected_genes %in% ensembl_genes$external_gene_name]
+  
+  # Strip suffixes and check again
+  stripped_genes <- sub("\\..*", "", missing_genes_after_correction)
+  common_genes_stripped <- stripped_genes[stripped_genes %in% ensembl_genes$external_gene_name]
+  final_missing_genes <- stripped_genes[!stripped_genes %in% ensembl_genes$external_gene_name]
+  
+  # Compute intermediate sets
+  common_before_correction <- setdiff(missing_genes, missing_genes_after_correction)
+  common_before_stripping <- setdiff(missing_genes_after_correction, final_missing_genes)
+  
+  # Combine results
+  all_common_genes <- unique(c(common_genes, common_genes_corrected, common_genes_stripped))
+  
+  # Summary
+  list(
+    common = all_common_genes,
+    final_missing = final_missing_genes,
+    common_before_correction = common_before_correction,
+    common_before_stripping = common_before_stripping,
+    bindestr_genes = common_genes_corrected,
+    strip_genes = common_genes_stripped,
+    orig_missing = missing_genes
+  )
+}
+
+IPF_genes_raw <- rownames(IPF_clean) 
+
+# Apply the function for Ensembl 103
+result_103 <- match_genes(IPF_genes_raw, ensembl_genes_103)
+```
+
+## Relabel IPF
+```{r}
+IPF4PPFEint <- IPF_clean
+DefaultAssay(IPF4PPFEint) <- "RNA"
+
+# Extract current gene names
+current_gene_names <- rownames(IPF4PPFEint)
+
+
+########## adjust the gene labels
+# List of specific genes to process
+genes_to_correct__ <- result_103$common_before_correction
+
+# Strip the suffix only from the specific genes
+corrected_gene_names <- ifelse(current_gene_names %in% genes_to_correct__, 
+                               gsub("-", "_", current_gene_names), 
+                               current_gene_names)
+# List of specific genes to process
+genes_to_strip <- result_103$common_before_stripping
+
+# Strip the suffix only from the specific genes
+corrected_gene_names <- ifelse(corrected_gene_names %in% genes_to_strip, 
+                               sub("\\..*", "", corrected_gene_names), 
+                               corrected_gene_names)
+
+as.data.frame(corrected_gene_names) %>% view()      
+#######################
+
+
+# Merge to create a mapping table
+gene_mapping <- merge(ensembl_genes_98, ensembl_genes_103, by = "ensembl_gene_id", suffixes = c("_98", "_103"))
+gene_mapping
+
+# Map old gene names to new ones
+new_gene_names <- gene_mapping$external_gene_name_98[match(corrected_gene_names, gene_mapping$external_gene_name_103)]
+as.data.frame(new_gene_names) %>% view()
+
+# Convert the feature names in the PPFE object
+convertRownames <- function(seu_object) {
+  new_rownames <- new_gene_names
+  rownames(seu_object@assays$RNA@counts) <- new_rownames
+  rownames(seu_object@assays$RNA@data) <- new_rownames
+  features_keep <- rownames(seu_object)[!is.na(rownames(seu_object))]
+  obj_new <- subset(seu_object, features = features_keep)
+  rownames(obj_new@assays$RNA@meta.features) <- rownames(obj_new)
+  return(obj_new)
+}
+
+# Convert gene names in srt obj
+IPF4PPFEint <- convertRownames(IPF4PPFEint)
+
+# Check Intersection of genes
+common_genes <- intersect(rownames(PPFE_Mes_int_final), rownames(IPF4PPFEint))
+
+# Reduce Object to common genes
+IPF4PPFEint <- DietSeurat(IPF4PPFEint, assays = "RNA",features = common_genes, dimreducs = c("pca", "umap"))
+
+# Save
+saveRDS(IPF4PPFEint, "Mes_IPF4PPFEint_GRCH38_v98features_PPFEoverlapgenes.rds")
+```
+
+## Final Gene Check
+```{r}
+length(rownames(PPFE_Epi_int_final))
+length(rownames(IPF4PPFEint))
+
+common_genes <- intersect(rownames(PPFE_Epi_int_final), rownames(IPF4PPFEint))
+length(common_genes)
+
+# Find distinct genes (present in one but not both datasets)
+distinct_genes <- setdiff(rownames(PPFE_Epi_int_final), common_genes)
+
+# View the distinct genes
+distinct_genes
+```
+
+## Prepare PPFE
+```{r}
+PPFE4IPFint <- DietSeurat(PPFE_Mes_int_final, assays = "RNA",features = common_genes, dimreducs = c("pca", "umap"))
+```
+
+
+## Integration
+```{r}
+PPFE4IPFint$Project <- "PPFE"
+IPF4PPFEint$Project <- "IPF"
+
+# Create Subject List for integration
+PPFE_mes.list <- SplitObject(PPFE4IPFint, split.by = "orig.ident")
+IPF_mes.list <- SplitObject(IPF4PPFEint, split.by = "orig.ident")
+```
+
+```{r}
+# merge the lists
+mes.list <- c(PPFE_mes.list, IPF_mes.list)
+rm(PPFE_mes.list)
+rm(IPF_mes.list)
+```
+
+
+```{r}
+mes.list <- lapply(X = mes.list, FUN = function(x) {
+    x <- NormalizeData(x, verbose = FALSE)
+    x <- FindVariableFeatures(x, verbose = FALSE, nfeatures = 2000)
+}) 
+```
+
+
+```{r}
+features <- SelectIntegrationFeatures(object.list = mes.list)
+
+## remove mito genes as integrator
+features <- features[-grep("MT-", features)]
+```
+
+```{r}
+mes.list <- lapply(X = mes.list, FUN = function(x) {
+    x <- ScaleData(x, features = features, vars.to.regress = c("nCount_RNA"), verbose = FALSE)
+    x <- RunPCA(x, features = features, verbose = FALSE, npcs = 50) # 50 Dims did not work out
+})
+```
+
+```{r}
+# Find Integration anchors
+anchors <- FindIntegrationAnchors(object.list = mes.list, 
+                                  reduction = "rpca",
+                                  reference = c(1:59)) # PPFE-CTRL as Reference Dataset
+```
+
+```{r}
+test_final <- IntegrateData(anchorset = anchors, k.weight = 30)
+```
+
+
+
+#=================
+
+# E.) Downstream
+
+### Reclustering
+```{r}
+test_final <- ScaleData(test_final, verbose = FALSE, vars.to.regress="percent.mt.n")
+test_final <- RunPCA(test_final, verbose = FALSE, npcs = 50)
+test_final <- RunUMAP(test_final, dims = 1:50)
+test_final <- FindNeighbors(test_final, reduction = "pca", dims = 1:50)
+test_final <- FindClusters(test_final, resolution = c(1,1.2,1.4, 1.6, 1.8, 2))
+```
+
+```{r, fig.width=13, fig.height=18}
+#library(SC3)
+
+# Assuming BOS_Epi_clean_int is your data
+# Replace it with your actual data if it's named differently
+
+# Specify the number of PCs per heatmap
+pcs_per_heatmap <- 9
+
+# Loop through dimensions in groups of 9
+for (start_dim in seq(1, 50, pcs_per_heatmap)) {
+  end_dim <- min(start_dim + pcs_per_heatmap - 1, 50)
+  
+  # Subset dimensions for the current heatmap
+  dims_subset <- start_dim:end_dim
+  
+  # Create a PCHeatmap for the current group of dimensions
+  PCHeatmap(test_final, cells = 200, balanced = TRUE, dims = dims_subset)
+  
+  # Add a newline between groups
+  cat("\n")
+}
+
+```
+
+```{r, fig.width=14}
+# Final  Reduction
+test_final <- RunUMAP(object = test_final, dims = c(1,2,3,4,6,7,8,9,12), reduction = "pca", reduction.name = "ReUMAPone", reduction.key = "ReUMAPone")
+```
+
+## DEGs
+```{r}
+Idents(test_final) <- "integrated_snn_res.2"
+Epi_Degs_Final_res1 <- FindAllMarkers(object = test_final, assay = "RNA", logfc.threshold = 1.5, only.pos = T)
+```
+```{r}
+Epi_Degs_Final_res1 <- Epi_Degs_Final_res1[with(Epi_Degs_Final_res1, avg_log2FC > 0.3 & p_val_adj < 0.05), ] # Filtering all > 0.3 for FOR Dixit Jonas aus Sci Adv Paper
+
+Epi_Degs_Final_res1 <- Epi_Degs_Final_res1 %>%
+  group_by(cluster) %>%
+  slice_max(n = 100, order_by = avg_log2FC)
+writexl::write_xlsx(Epi_Degs_Final_res1, "PPFE_IPF_DEGs_Mes_Cleaned_res2_final.xlsx")
+Epi_Degs_Final_res1
+```
+
+
+```{r}
+PPFE_mes_int <- SCP::RenameClusters(PPFE_mes_int, group.by = "integrated_snn_res.2", 
+                                        nameslist = c("Alveolar_Fb", #0
+                                                      "Alveolar_Fb", #1
+                                                      "Subpleural_Fb", #10
+                                                      "Alveolar_Fb", # 11 # 
+                                                      "Airway_Fb", #12 # 
+                                                      "Alveolar_Fb", # 13
+                                                      "Smooth_Muscle", # 14 # 
+                                                      "Adventitial_like_Fb", # 15 
+                                                      "Pericytes", #16
+                                                      "Alveolar_Fb",  # 17
+                                                      "Alveolar_Fb", # 18
+                                                      "Smooth_Muscle", # 19
+                                                      "Alveolar_Fb", # 2
+                                                      "CTHRC1_hi_MyoFb", # 20
+                                                      "Alveolar_Fb", # 21
+                                                      "TINAGL_Smooth_Muscle", # 22
+                                                      "CEMIP_Alveolar_Fb", # 23
+                                                      "Pericytes", #24  
+                                                      "Smooth_Muscle",# 25
+                                                      "Alveolar_Fb", # 26
+                                                     "Smooth_Muscle", # 27
+                                                     "Airway_Fb", # 28
+                                                     "Adventitial_Fb", # 29
+                                                     "Adventitial_Fb", # 3
+                                                     "Subpleural_Fb", # 30
+                                                     "Alveolar_Fb", # 31
+                                                     "CEMIP_Alveolar_Fb", #32
+                                                     "Mesothelium", #33
+                                                     "Adventitial_like_Fb", # 34
+                                                     "Alveolar_Fb", # 35 
+                                                     "Schwann_Neu", # 36
+                                                     "Trash", # 37
+                                                     "Trash", # 38
+                                                     "CTHRC1_hi_MyoFb", #4
+                                                     "Alveolar_Fb", # 5
+                                                     "Alveolar_Fb", # 6
+                                                     "Pericytes", # 7
+                                                      "CEMIP_Alveolar_Fb", # 8  
+                                                     "Alveolar_Fb" # 9 
+                                                     ), 
+                                        name = "Celltype_ID_fine") 
+
+PPFE_mes_int <- SCP::RenameClusters(PPFE_mes_int, group.by = "integrated_snn_res.2", 
+                                        nameslist = c("Alveolar_Fb", #0
+                                                      "Alveolar_Fb", #1
+                                                      "Subpleural_Fb", #10
+                                                      "Alveolar_Fb", # 11 # 
+                                                      "Airway_Fb", #12 # 
+                                                      "Alveolar_Fb", # 13
+                                                      "Smooth_Muscle", # 14 
+                                                      "Adventitial_like_Fb", #15
+                                                      "Pericytes", #16
+                                                      "Alveolar_Fb",  # 17
+                                                      "Alveolar_Fb", # 18
+                                                      "Smooth_Muscle", # 19
+                                                      "Alveolar_Fb", # 2
+                                                      "CTHRC1_MyoFb", # 20
+                                                      "Alveolar_Fb", # 21
+                                                      "Smooth_Muscle", # 22
+                                                      "Alveolar_Fb", # 23
+                                                      "Pericytes", #24  
+                                                      "Smooth_Muscle",# 25
+                                                      "Alveolar_Fb", # 26
+                                                     "Smooth_Muscle", # 27
+                                                     "Airway_Fb", # 28
+                                                     "Adventitial_Fb", # 29
+                                                     "Adventitial_Fb", # 3
+                                                     "Subpleural_Fb", # 30
+                                                     "Alveolar_Fb", # 31
+                                                     "Alveolar_Fb", #32
+                                                     "Mesothelium", #33
+                                                     "Adventitial_like_Fb", # 34
+                                                     "Alveolar_Fb", # 35 
+                                                     "Schwann_Neu", # 36
+                                                     "Trash", # 37
+                                                     "Trash", # 38
+                                                     "CTHRC1_MyoFb", #4
+                                                     "Alveolar_Fb", # 5
+                                                     "Alveolar_Fb", # 6
+                                                     "Pericytes", # 7
+                                                      "Alveolar_Fb", # 8  
+                                                     "Alveolar_Fb" # 9 
+                                                     ), 
+                                        name = "Celltype_ID_coarse") 
+```
+
+
+### Last Cleaning
+```{r}
+# remove Junk
+PPFE_mes_int_clean <- subset(PPFE_mes_int, Celltype_ID_fine != "Trash")
+
+# Drop metadata levels
+PPFE_mes_int_clean@meta.data$Celltype_ID_fine <- droplevels(PPFE_mes_int_clean@meta.data$Celltype_ID_fine)
+PPFE_mes_int_clean@meta.data$Celltype_ID_coarse <- droplevels(PPFE_mes_int_clean@meta.data$Celltype_ID_coarse)
+```
+
+#===========
+# Adjust metadata col names
+```{r}
+# Unify Cohort label
+PPFE_mes_int_clean <- PPFE_mes_int_clean %>%
+  mutate(Cohort = case_when(Project == "PPFE" ~ Cohort,
+                            Project == "IPF" ~ "Belgium"),
+         orig.ident_final = case_when(Project == "PPFE" ~ orig.ident,
+                                Project == "IPF" ~ paste0("IPFnuc_",substr(orig.ident, start = 1, stop = 10)))
+         
+       )
+# Overwrite old orig.ident
+PPFE_mes_int_clean$orig.ident <- PPFE_mes_int_clean$orig.ident_final
+
+# introduce disease_cohort
+PPFE_mes_int_clean <- PPFE_mes_int_clean %>%
+  mutate(disease_cohort = paste(disease.ident, Cohort, sep = "_"),
+         disease.ident_cohort = case_when(Project == "PPFE" ~ paste0(PPFE_mes_int_clean$Cohort, "__", PPFE_mes_int_clean$disease.ident,
+                                           Project == "IPF" ~ "Belgium__IPF")
+                                          )
+         )
+
+# Move main celltype label to Celltype Col
+PPFE_mes_int_clean$Celltype <- PPFE_mes_int_clean$Celltype_ID_coarse
+
+# "ReUMAPone" = Reduction to use
+```
+
+
+# Save
+```{r}
+saveRDS(PPFE_mes_int_clean, file.path(folder, "PPFE_Mes_Lineage.rds"))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+

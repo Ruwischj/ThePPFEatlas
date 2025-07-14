@@ -1,0 +1,251 @@
+---
+title: "PPFE_IPF_INTEGRATION_FINAL_MERGE"
+author: "Jannik Ruwisch"
+date: "2024-10-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T,
+                      fig.width = 14,
+                      fig.height = 7,
+                      dev = "png",
+                      cache = F)
+```
+
+
+```{r}
+library(SCP)
+library(Seurat)
+library(SeuratObject)
+library(dplyr)
+library(tidyverse)
+library(tidyseurat)
+library(ggpubr)
+library(data.table)
+library(magrittr)
+```
+
+# Read in all datasets
+```{r}
+ppfe_epi <- readRDS("./PPFE_Epi_Lineage.rds")
+ppfe_mes <- readRDS("./PPFE_Mes_Lineage.rds")
+ppfe_endo <- readRDS("./PPFE_Endo_Lineage.rds")
+ppfe_lymph <- readRDS("./PPFE_Lymphoid_Lineage.rds")
+ppfe_myeloid <- readRDS("./PPFE_Myeloid_Lineage.rds")
+```
+
+```{r, fig.width=35}
+CellDimPlot(ppfe_epi, group.by = "Celltype_ID_final_coarse", reduction = "ReUMAP_20")  |
+  CellDimPlot(ppfe_mes, group.by = "Celltype_ID_final_coarse", reduction = "ReUMAPone")  |
+  CellDimPlot(ppfe_endo, group.by = "Celltype_ID_coarse", reduction = "ReUMAP_20")  | 
+  CellDimPlot(ppfe_myeloid, group.by = "Celltype_ID_fine", reduction = "ReUMAP_10")  | 
+  CellDimPlot(ppfe_lymph, group.by = "Celltype_ID_fine", reduction = "ReUMAP_18" ) 
+
+CellDimPlot(ppfe_epi, group.by = "Celltype_Coarse", reduction = "ReUMAP_20")  |
+  CellDimPlot(ppfe_mes, group.by = "Celltype_Coarse", reduction = "ReUMAPone")  |
+  CellDimPlot(ppfe_endo, group.by = "Celltype_Coarse", reduction = "ReUMAP_20")  | 
+  CellDimPlot(ppfe_myeloid, group.by = "Celltype_Coarse", reduction = "ReUMAP_10")  | 
+  CellDimPlot(ppfe_lymph, group.by = "Celltype_Coarse", reduction = "ReUMAP_18" ) 
+  
+```
+
+## CHeck the ident Label in IPF Dataset
+```{r}
+temp <- subset(ppfe_epi, Project == "IPF") 
+temp$Sample.ID %>% unique()
+rm(temp)
+
+temp <- subset(ppfe_endo, Project == "IPF") 
+temp$Sample.ID %>% unique()
+rm(temp)
+
+
+temp <- subset(ppfe_lymph, Project == "IPF") 
+temp$Sample.ID %>% unique()
+rm(temp)
+
+
+temp <- subset(ppfe_mes, Project == "IPF") 
+temp$Sample.ID %>% unique()
+rm(temp)
+
+
+temp <- subset(ppfe_myeloid, Project == "IPF") 
+temp$Sample.ID %>% unique()
+rm(temp)
+```
+```{r}
+temp <- subset(ppfe_epi, Project == "IPF") 
+temp$Sample.ID %>% unique()
+rm(temp)
+```
+
+
+```{r}
+# Adjust the orig.ident 
+ppfe_epi <- ppfe_epi %>%
+  mutate(orig.ident_final = case_when(Project == "IPF"  ~ substr(Sample.ID, start = 1, stop = 3),
+                                      Project == "PPFE" ~ orig.ident)
+         )
+
+ppfe_mes <- ppfe_mes %>%
+  mutate(orig.ident_final = case_when(Project == "IPF"  ~ substr(Sample.ID, start = 1, stop = 3),
+                                      Project == "PPFE" ~ orig.ident)
+  )
+
+ppfe_endo <- ppfe_endo %>%
+  mutate(orig.ident_final = case_when(Project == "IPF"  ~ substr(Sample.ID, start = 1, stop = 3),
+                                      Project == "PPFE" ~ orig.ident)
+  )
+
+ppfe_myeloid <- ppfe_myeloid %>%
+  mutate(orig.ident_final = case_when(Project == "IPF"  ~ substr(Sample.ID, start = 1, stop = 3),
+                                      Project == "PPFE" ~ orig.ident)
+  )
+
+ppfe_lymph <- ppfe_lymph %>%
+  mutate(orig.ident_final = case_when(Project == "IPF"  ~ substr(Sample.ID, start = 1, stop = 3),
+                                      Project == "PPFE" ~ orig.ident)
+  )
+
+```
+
+```{r}
+temp <- subset(ppfe_epi, Project == "IPF") 
+temp$orig.ident_final %>% unique()
+rm(temp)
+
+temp <- subset(ppfe_endo, Project == "IPF") 
+temp$orig.ident_final %>% unique()
+rm(temp)
+
+
+temp <- subset(ppfe_lymph, Project == "IPF") 
+temp$orig.ident_final %>% unique()
+rm(temp)
+
+
+temp <- subset(ppfe_mes, Project == "IPF") 
+temp$orig.ident_final %>% unique()
+rm(temp)
+
+
+temp <- subset(ppfe_myeloid, Project == "IPF") 
+temp$orig.ident_final %>% unique()
+rm(temp)
+```
+
+
+## RPCA_Reference Integration Pipline 
+```{r}
+ppfe_epi$Lineage <- "Epithelium"
+ppfe_mes$Lineage <- "Mesenchyme"
+ppfe_endo$Lineage <- "Endothelium"
+ppfe_myeloid$Lineage <- "Myeloid"
+ppfe_lymph$Lineage <- "Lymphoid"
+
+
+
+rds_list <- merge(x = ppfe_epi, y = c(ppfe_mes, ppfe_endo, ppfe_myeloid, ppfe_lymph))
+# Get a List of all samples 
+rds_list <- SplitObject(rds_list, split.by = "orig.ident_final")
+```
+
+```{r}
+rm(ppfe_endo)
+rm(ppfe_epi)
+rm(ppfe_mes)
+rm(ppfe_lymph)
+rm(ppfe_myeloid)
+```
+
+
+```{r}
+lapply(rds_list, function(x) {
+  print(dim(GetAssayData(x, assay = "RNA", slot = "counts")))  # Check dimensions of the RNA assay counts
+})
+```
+
+
+
+```{r}
+rds_list <- lapply(rds_list, function(x) {
+  DefaultAssay(x) <- "RNA"
+  x <- NormalizeData(x, verbose = FALSE)
+  x <- FindVariableFeatures(x, verbose = FALSE, nfeatures = 2000)
+  return(x)
+})
+```
+
+```{r}
+features <- SelectIntegrationFeatures(object.list = rds_list, nfeatures = 2000)
+
+## remove mito genes as integrator
+features <- features[!grepl("MT-", features)]
+```
+
+```{r}
+rds_list <- lapply(X = rds_list, FUN = function(x) {
+    x <- ScaleData(x, features = features, vars.to.regress = c("nCount_RNA"), verbose = FALSE)
+    x <- RunPCA(x, features = features, verbose = FALSE)
+})
+```
+
+```{r}
+# Find Integration anchors
+anchors <- FindIntegrationAnchors(object.list = rds_list, reduction = "rpca",
+                                  reference = c(1:59))
+```
+
+```{r}
+ppfe_integrated <- IntegrateData(anchorset = anchors, k.weight = 30)
+```
+
+## Post-Integration Downstream
+```{r}
+ppfe_integrated <- ScaleData(ppfe_integrated, vars.to.regress="percent.mt.n")
+ppfe_integrated <- RunPCA(ppfe_integrated, verbose = FALSE)
+ppfe_integrated <- RunUMAP(ppfe_integrated, dims = 1:15)
+```
+
+## Lineage and Celltype Label
+```{r}
+ppfe_integrated <- ppfe_integrated %>% 
+  mutate(Celltype_ID_final = case_when(Lineage == "Epithelium" ~ Celltype_ID_final_coarse,
+                                       Lineage == "Mesenchyme" ~ Celltype_ID_final_coarse,
+                                       Lineage == "Endothelium" ~ Celltype_ID_coarse,
+                                       Lineage == "Myeloid" ~ Celltype_ID_fine,
+                                       Lineage == "Lymphoid" ~ Celltype_ID_fine)
+         )
+
+ppfe_integrated$Lineage <- factor(ppfe_integrated$Lineage, levels = c("Mesenchyme",
+                                                                      "Lymphoid",
+                                                                      "Endothelium",
+                                                                      "Epithelium",
+                                                                      "Myeloid"))
+
+ppfe_integrated$Celltype <- ppfe_integrated$Celltype_ID_final
+```
+
+#==========
+
+# 2. Downstream 
+
+## Refine Embedding
+```{r}
+test <- RunUMAP2(object = test, dims = 1:50, reduction = "pca", reduction.name = "ReUMAP_50", reduction.key = "ReUMAP_50")
+test <- RunUMAP2(object = test, dims = 1:20, reduction = "pca", reduction.name = "ReUMAP_20", reduction.key = "ReUMAP_20")
+```
+
+## Test Reductions/Embeddings
+```{r, fig.width=20, fig.height=20}
+CellDimPlot(ppfe_integrated, group.by = "Lineage", raster = F, label = T, label_insitu = T, label_repel = T, legend.position = "none", reduction = "ReUMAP_50", palette = "Dark2", pt.size = 0.1, combine = F)
+
+CellDimPlot(test, group.by = "Lineage", raster = F, label = T, label_insitu = T, label_repel = T, reduction = "ReUMAP_50", palette = "Dark2", pt.size = 0.1, combine = F)
+```
+
+## Save
+```{r}
+saveRDS(test, "./PPFE_merged_final")
+```

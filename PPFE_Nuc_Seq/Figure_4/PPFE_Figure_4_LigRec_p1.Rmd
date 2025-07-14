@@ -1,0 +1,188 @@
+---
+title: "Multinichenet_Figure4_EPI"
+author: "Jannik Ruwisch"
+date: "2025-03-27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T,
+                      fig.width = 14,
+                      fig.height = 7,
+                      #dpi = 1200,
+                      dev = "png",
+                      cache = F)
+```
+
+# Load libraries
+```{r}
+library(SCP)
+library(Seurat)
+library(SeuratObject)
+library(dplyr)
+library(dplyr)
+library(tidyverse)
+library(tidyseurat)
+library(ggpubr)
+```
+
+# Load Object
+```{r}
+PPFE_Epi <- readRDS("./PPFE_Epi_Lineage.rds")
+multinichenet_output <- readRDS("./PPFE_CTRL_subsampled_Celltype_multinichenet_output.rds") # PPFE vs. CTRL
+```
+
+# Save Path
+```{r}
+# save the final seurat objects
+folder = choose.dir()
+```
+
+# Setup Multinichenet
+```{r}
+organism = "human"
+options(timeout = 120)
+if(organism == "human"){
+  
+  lr_network_all = 
+    readRDS(url(
+      "https://zenodo.org/record/10229222/files/lr_network_human_allInfo_30112033.rds"
+      )) %>% 
+    mutate(
+      ligand = convert_alias_to_symbols(ligand, organism = organism), 
+      receptor = convert_alias_to_symbols(receptor, organism = organism))
+  
+  lr_network_all = lr_network_all  %>% 
+    mutate(ligand = make.names(ligand), receptor = make.names(receptor)) 
+  
+  lr_network = lr_network_all %>% 
+    distinct(ligand, receptor)
+  
+  ligand_target_matrix = readRDS(url(
+    "https://zenodo.org/record/7074291/files/ligand_target_matrix_nsga2r_final.rds"
+    ))
+  
+  colnames(ligand_target_matrix) = colnames(ligand_target_matrix) %>% 
+    convert_alias_to_symbols(organism = organism) %>% make.names()
+  rownames(ligand_target_matrix) = rownames(ligand_target_matrix) %>% 
+    convert_alias_to_symbols(organism = organism) %>% make.names()
+  
+  lr_network = lr_network %>% filter(ligand %in% colnames(ligand_target_matrix))
+  ligand_target_matrix = ligand_target_matrix[, lr_network$ligand %>% unique()]
+  
+} else if(organism == "mouse"){
+  
+  lr_network_all = readRDS(url(
+    "https://zenodo.org/record/10229222/files/lr_network_mouse_allInfo_30112033.rds"
+    )) %>% 
+    mutate(
+      ligand = convert_alias_to_symbols(ligand, organism = organism), 
+      receptor = convert_alias_to_symbols(receptor, organism = organism))
+  
+  lr_network_all = lr_network_all  %>% 
+    mutate(ligand = make.names(ligand), receptor = make.names(receptor)) 
+  lr_network = lr_network_all %>% 
+    distinct(ligand, receptor)
+  
+  ligand_target_matrix = readRDS(url(
+    "https://zenodo.org/record/7074291/files/ligand_target_matrix_nsga2r_final_mouse.rds"
+    ))
+  
+  colnames(ligand_target_matrix) = colnames(ligand_target_matrix) %>% 
+    convert_alias_to_symbols(organism = organism) %>% make.names()
+  rownames(ligand_target_matrix) = rownames(ligand_target_matrix) %>% 
+    convert_alias_to_symbols(organism = organism) %>% make.names()
+  
+  lr_network = lr_network %>% filter(ligand %in% colnames(ligand_target_matrix))
+  ligand_target_matrix = ligand_target_matrix[, lr_network$ligand %>% unique()]
+  
+}
+```
+
+# Define Color Palettes
+```{r}
+colors_sender =  SCP::palette_scp(n = 22, palcolor =c(
+  "#E1244D",  # Aberrant_Basaloid
+  "#6A3D9A",  # Adventitial_Fb
+  "#CAB2D6",  # Adventitial_like_Fb
+  "#199784",  # AEC1
+  "#1F78B4",  # Airway_Fb
+  "#A6CEE3",  # Alveolar_Fb
+  "#FFED6F",  # B_Cells_memory
+  "#A5AA99",  # Basal
+  "#C7D98C",  # CD8_TC_resident_memory
+  "#715588",  # Club
+  "#E31A1C",  # CTHRC1_MyoFb
+  "#1D5152",  # DC2
+  "#8491B4",  # EC_aerocyte
+  "#F39B7F",  # EC_arterial
+  "#3C5488",  # EC_general_cap
+  "#00A087",  # EC_lymphatic
+  "#E64B35",  # EC_systemic_venous
+  "#C19D94",  # Fibrotic_Macrophage
+  "#F9CDE4",  # gamma_delta_TC
+  "#6A7998",  # Monocyte_Classical
+  "#BE777C",  # Monocyte_derived_Macrophage
+  "#BA7769",  # Monocyte_nonClassical
+  "#DED7DA",  # NKCellsCD16_hi
+  "#CC831E",  # Secretory
+  "#FB9A99",  # Subpleural_Fb
+  "#8DD3C7"   # Treg
+), x = senders_receivers)
+
+colors_receiver =  SCP::palette_scp(n = 22, palcolor = c(
+  "#E1244D",  # Aberrant_Basaloid
+  "#6A3D9A",  # Adventitial_Fb
+  "#CAB2D6",  # Adventitial_like_Fb
+  "#199784",  # AEC1
+  "#1F78B4",  # Airway_Fb
+  "#A6CEE3",  # Alveolar_Fb
+  "#FFED6F",  # B_Cells_memory
+  "#A5AA99",  # Basal
+  "#C7D98C",  # CD8_TC_resident_memory
+  "#715588",  # Club
+  "#E31A1C",  # CTHRC1_MyoFb
+  "#1D5152",  # DC2
+  "#8491B4",  # EC_aerocyte
+  "#F39B7F",  # EC_arterial
+  "#3C5488",  # EC_general_cap
+  "#00A087",  # EC_lymphatic
+  "#E64B35",  # EC_systemic_venous
+  "#C19D94",  # Fibrotic_Macrophage
+  "#F9CDE4",  # gamma_delta_TC
+  "#6A7998",  # Monocyte_Classical
+  "#BE777C",  # Monocyte_derived_Macrophage
+  "#BA7769",  # Monocyte_nonClassical
+  "#DED7DA",  # NKCellsCD16_hi
+  "#CC831E",  # Secretory
+  "#FB9A99",  # Subpleural_Fb
+  "#8DD3C7"   # Treg
+), x = senders_receivers)
+
+```
+
+# Ligand - Receptor Bubbleplot 
+```{r, fig.height=48, fig.width=24}
+# Define group oi (PPFE vs. CTRL)
+group_oi = "PPFE"
+
+# Get prio lig. rec. pairs
+prioritized_tbl_oi_M_50 = get_top_n_lr_pairs(
+  multinichenet_output$prioritization_tables, 
+  11, # top 11 hits
+  groups_oi = group_oi, 
+  senders_oi = c("Aberrant_Basaloid"), # Define Sender
+  receivers_oi = c("CTHRC1_MyoFb")) # Define Receiver
+
+plot_oi = make_sample_lr_prod_activity_plots_Omnipath(widths = c(18,2,2,1),
+  multinichenet_output$prioritization_tables, 
+  prioritized_tbl_oi_M_50 %>% inner_join(lr_network_all)
+  )
+
+# Export as PDF 
+pdf(file = file.path(paste0(output_dir,"/BubblePlot_MultiNichenet_", "Aberrant_Basaloid_sender","_legend", group_oi, ".pdf")), 
+                      width = 23, 
+                      height = 3)
+plot_oi
+dev.off()
+```

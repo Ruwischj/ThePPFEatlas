@@ -1,0 +1,723 @@
+---
+title: "PPFE_integrated_b1_b2_epithelium"
+author: "Jannik Ruwisch"
+date: "2024-10-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T,
+                      fig.width = 14,
+                      fig.height = 7,
+                      #dpi = 1200,
+                      dev = "png",
+                      cache = F)
+```
+
+
+```{r}
+library(SCP)
+library(Seurat)
+library(SeuratObject)
+library(dplyr)
+library(tidyverse)
+library(tidyseurat)
+library(ggpubr)
+library(data.table)
+library(magrittr)
+```
+
+# Load_Dataset
+```{r}
+PPFE_Imm._int_clean2 <- readRDS("./PPFE_Immune_all_run2_19_06_2024.rds") # Post two iterations of cleaning
+```
+
+# Myeloid Cell Cleaning
+
+# C1) - Myeloid Cells - Run 1
+```{r}
+PPFE_myeloid <- subset(PPFE_Imm._int_clean2, integrated_snn_res.2 == 0 |
+                         integrated_snn_res.2 == 26 |
+                                   integrated_snn_res.2 == 23 |
+                                   integrated_snn_res.2 == 18 |
+                                   integrated_snn_res.2 == 30 |
+                                   integrated_snn_res.2 == 34 |
+                                   integrated_snn_res.2 == 6 |
+                                   integrated_snn_res.2 == 27 |
+                                   integrated_snn_res.2 == 21 |
+                                   integrated_snn_res.2 == 25 |
+                                   integrated_snn_res.2 == 38 |
+                                   integrated_snn_res.2 == 33 |
+                                   integrated_snn_res.2 == 24 | 
+                         integrated_snn_res.2 == 37 | 
+                         integrated_snn_res.2 == 28 | 
+                         integrated_snn_res.2 == 8)  
+                       
+
+CellDimPlot(PPFE_myeloid, group.by = "integrated_snn_res.2", reduction =  "ReUMAP_100", label = T, label_insitu = T)
+```
+
+```{r}
+# Set the default assay to "RNA"
+DefaultAssay(PPFE_myeloid) <- "RNA"
+
+# Create Subject List for integration
+PPFE_myeloid.list <- SplitObject(PPFE_myeloid, split.by = "orig.ident")
+```
+
+
+```{r}
+PPFE_myeloid.list <- lapply(X = PPFE_myeloid.list, FUN = function(x) {
+    x <- NormalizeData(x, verbose = FALSE)
+    x <- FindVariableFeatures(x, verbose = FALSE, nfeatures = 2000)
+})
+
+features <- SelectIntegrationFeatures(object.list = PPFE_myeloid.list)
+
+## remove mito genes as integrator
+features <- features[-grep("MT-", features)]
+
+PPFE_myeloid.list <- lapply(X = PPFE_myeloid.list, FUN = function(x) {
+    x <- ScaleData(x, features = features, vars.to.regress = c("nCount_RNA"), verbose = FALSE)
+    x <- RunPCA(x, features = features, verbose = FALSE, npcs = 50)
+})
+# Find Integration anchors
+anchors <- FindIntegrationAnchors(object.list = PPFE_myeloid.list, reduction = "rpca", dims = 1:50)
+```
+
+### RPCA integration
+```{r}
+PPFE_myeloid_int <-IntegrateData(anchorset = anchors)
+```
+
+### Reclustering
+```{r}
+PPFE_myeloid_int <- ScaleData(PPFE_myeloid_int, verbose = FALSE, vars.to.regress="percent.mt")
+PPFE_myeloid_int <- RunPCA(PPFE_myeloid_int, verbose = FALSE, npcs = 100)
+PPFE_myeloid_int <- RunUMAP(PPFE_myeloid_int, dims = 1:100)
+PPFE_myeloid_int <- FindNeighbors(PPFE_myeloid_int, reduction = "pca", dims = 1:100)
+PPFE_myeloid_int <- FindClusters(PPFE_myeloid_int, resolution = 2)
+```
+
+```{r, fig.width=14}
+PPFE_myeloid_int <- RunUMAP(object = PPFE_myeloid_int, dims = 1:100, reduction = "pca", reduction.name = "ReUMAP_100", reduction.key = "ReUMAP_100")
+PPFE_myeloid_int <- RunUMAP(object = PPFE_myeloid_int, dims = 1:75, reduction = "pca", reduction.name = "ReUMAP_75", reduction.key = "ReUMAP_75")
+PPFE_myeloid_int <- RunUMAP(object = PPFE_myeloid_int, dims = 1:50, reduction = "pca", reduction.name = "ReUMAP_50", reduction.key = "ReUMAP_50")
+PPFE_myeloid_int <- RunUMAP(object = PPFE_myeloid_int, dims = 1:30, reduction = "pca", reduction.name = "ReUMAP_30", reduction.key = "ReUMAP_30")
+PPFE_myeloid_int <- RunUMAP(object = PPFE_myeloid_int, dims = 1:20, reduction = "pca", reduction.name = "ReUMAP_20", reduction.key = "ReUMAP_20")
+PPFE_myeloid_int <- RunUMAP(object = PPFE_myeloid_int, dims = 1:15, reduction = "pca", reduction.name = "ReUMAP_15", reduction.key = "ReUMAP_15")
+PPFE_myeloid_int <- RunUMAP(object = PPFE_myeloid_int, dims = 1:11, reduction = "pca", reduction.name = "ReUMAP_11", reduction.key = "ReUMAP_11")
+PPFE_myeloid_int <- RunUMAP(object = PPFE_myeloid_int, dims = 1:12, reduction = "pca", reduction.name = "ReUMAP_12", reduction.key = "ReUMAP_12")
+PPFE_myeloid_int <- RunUMAP(object = PPFE_myeloid_int, dims = 1:8, reduction = "pca", reduction.name = "ReUMAP_08", reduction.key = "ReUMAP_08")
+PPFE_myeloid_int <- RunUMAP(object = PPFE_myeloid_int, dims = 1:10, reduction = "pca", reduction.name = "ReUMAP_10", reduction.key = "ReUMAP_10")
+PPFE_myeloid_int <- RunUMAP(object = PPFE_myeloid_int, dims = 1:7, reduction = "pca", reduction.name = "ReUMAP_07", reduction.key = "ReUMAP_07")
+PPFE_myeloid_int <- RunUMAP(object = PPFE_myeloid_int, dims = 1:5, reduction = "pca", reduction.name = "ReUMAP_05", reduction.key = "ReUMAP_05")
+```
+
+### QC
+```{r}
+CellDimPlot(PPFE_myeloid_int, group.by = c("disease.ident", "integrated_snn_res.2"), reduction = "ReUMAP_11", combine = T, label = T, label_insitu = T)
+```
+
+
+```{r}
+CellDimPlot(PPFE_myeloid_int, group.by = c("integrated_snn_res.2", "orig.ident"), reduction = "ReUMAP_100", combine = F, label_insitu = T, label = T)
+FeatureDimPlot(PPFE_myeloid_int, features = c("nCount_RNA", "nFeature_RNA", "percent.mt"))
+
+CellDimPlot(PPFE_myeloid_int, group.by = c("Celltype_ID", "integrated_snn_res.2"), reduction = "ReUMAP_100", combine = T, label = T, label_insitu = T)
+Seurat::DimPlot(PPFE_myeloid_int, group.by = c("disease.ident", "integrated_snn_res.2"), combine = T, label = T, shuffle = T)
+
+CellDimPlot(PPFE_myeloid_int, group.by = c("integrated_snn_res.2", "orig.ident"), reduction = "ReUMAP_100", combine = F, label_insitu = T, label = T)
+FeatureDimPlot(PPFE_myeloid_int, features = c("nCount_RNA", "nFeature_RNA", "percent.mt", "PTPRC"), nrow = 2, reduction = "ReUMAP_100", assay = "RNA")
+```
+
+### DEGs
+```{r}
+PPFE_myeloid_int <- RunDEtest(srt = PPFE_myeloid_int, group_by = "integrated_snn_res.2", fc.threshold = 1.5, only.pos = T, assay = "RNA")
+```
+
+```{r}
+Idents(PPFE_myeloid_int) <- "integrated_snn_res.2"
+Myeloid_Degs_Final <- FindAllMarkers(object = PPFE_myeloid_int, assay = "RNA", logfc.threshold = 1.5, only.pos = T)
+```
+```{r}
+Myeloid_Degs_Final <- PPFE_myeloid_int@tools$DEtest_integrated_snn_res.2$AllMarkers_wilcox
+Myeloid_Degs_Final 
+```
+```{r}
+Myeloid_Degs_Final <- Myeloid_Degs_Final[with(Myeloid_Degs_Final, avg_log2FC > 0.3 & p_val_adj < 0.05), ] 
+
+Myeloid_Degs_Final <- Myeloid_Degs_Final %>%
+  group_by(group1) %>%
+  slice_max(n = 100, order_by = avg_log2FC)
+writexl::write_xlsx(Myeloid_Degs_Final, "PPFE_DEGs_Myeloids_Cleaned_round_3.xlsx")
+Myeloid_Degs_Final
+saveRDS(PPFE_myeloid_int, "PPFE_Myeloids_Run3_ALL.rds")
+```
+
+### Rename Clusters
+```{r}
+PPFE_myeloid_int <- SCP::RenameClusters(PPFE_myeloid_int, group.by = "integrated_snn_res.2", nameslist = 
+                                          c("Mast", #0
+                                     "Monocyte_derived_Macrophage", #1
+                                          "Monocyte_Classical", #10
+                                           "Monocyte_Classical", # 11 
+                                       "DC2", #12 
+                                     "Alveolar_Macrophage", # 13 
+                                 "Monocyte_derived_Macrophage", # 14 
+                                       "Monocyte_nonClassical", #  15 
+                                   "Monocyte_derived_Macrophage", #16 
+                                         "Mast",  # 17 
+                                           "Neutrophils", # 18 
+                                   "CXCL10_Monocyte_derived_Macrophage", # 19 
+                                       "Alveolar_Macrophage", #2"
+                                        "Monocyte_nonClassical", # 20
+                                   "Monocyte_derived_Macrophage", # 21 
+                                     "Monocyte_derived_Macrophage", # 22 
+                                     "Neutrophils", # 23 
+                                     "DC1", #24 
+                                   "Monocyte_derived_Macrophage",# 25
+                                     "Mast", # 26 
+                                         "pDC", # 27 
+                                     "Monocyte_derived_Macrophage", # 28 
+                                         "DC2", #29 
+                                     "Monocyte_Classical", # 3 
+                                                          "Mast",# 30 
+                                                         "Alveolar_Macrophage", # 31 
+                                                  "Mast", # 32
+                                   "Monocyte_derived_Macrophage", #4 
+                                                         "Monocyte_Classical", # 5 
+                                       "Monocyte_derived_Macrophage", # 6 
+                                       "Mast", #  7 
+                                           "DC2", # 8 
+                               "Monocyte_derived_Macrophage" #9 
+                                                         ), 
+                                        name = "Celltype_ID_coarse") 
+
+
+PPFE_myeloid_int <- SCP::RenameClusters(PPFE_myeloid_int, group.by = "integrated_snn_res.2", nameslist = 
+                                          c("Mast", #0
+                                         "Monocyte_derived_Macrophage", #1
+                                              "Monocyte_Classical", #10
+                                               "Monocyte_Classical", # 11 
+                                           "DC2", #12 
+                                         "Alveolar_Macrophage", # 13 
+                                     "Monocyte_derived_Macrophage", # 14 
+                                           "Monocyte_nonClassical", #  15 
+                                       "Monocyte_derived_Macrophage", #16 
+                                             "Mast",  # 17 
+                                               "Neutrophils", # 18 
+                                       "CXCL10_Monocyte_derived_Macrophage", # 19 
+                                           "SPP1_Macrophage", #2"
+                                            "Monocyte_nonClassical", # 20
+                                       "Monocyte_derived_Macrophage", # 21 
+                                         "Monocyte_derived_Macrophage", # 22 
+                                         "Neutrophils", # 23 
+                                         "DC1", #24 
+                                       "Monocyte_derived_Macrophage",# 25
+                                         "Mast", # 26 
+                                             "pDC", # 27 
+                                         "Monocyte_derived_Macrophage", # 28 
+                                             "DC2", #29 
+                                         "Monocyte_Classical", # 3 
+                                                              "Mast",# 30 
+                                                             "Alveolar_Macrophage", # 31
+                                                  "Mast", # 32
+                                       "Monocyte_derived_Macrophage", #4 
+                                                             "Monocyte_Classical", # 5 
+                                           "Monocyte_derived_Macrophage", # 6 
+                                           "Mast", #  7 
+                                               "DC2", # 8 
+                                   "Monocyte_derived_Macrophage" #9 
+                                                             ), 
+                                        name = "Celltype_ID_fine") 
+```
+
+
+### Cleaning
+```{r}
+# remove Junk
+PPFE_myeloid_int_clean <- subset(PPFE_myeloid_int, Celltype_ID_fine != "Schrott")
+
+# Drop metadata levels
+PPFE_myeloid_int_clean@meta.data$Celltype_ID_fine <- droplevels(PPFE_myeloid_int_clean@meta.data$Celltype_ID_fine)
+PPFE_myeloid_int_clean@meta.data$Celltype_ID_coarse <- droplevels(PPFE_myeloid_int_clean@meta.data$Celltype_ID_coarse)
+```
+
+
+#==================================================
+
+# D.) Integrate with IPF
+
+### Load IPF data
+```{r}
+IPF_raw <- load("./IPF_snRNAseq_Data_Myeloid.Robj") # GSE286182
+IPF_raw <- UpdateSeuratObject(immune.obj)
+rm(immune.obj)
+Version(IPF_raw)
+IPF_clean <- subset(IPF_raw, disease.ident == "IPF")
+rm(IPF_raw)
+# Adjust orig.ident
+IPF_clean$orig.ident <- factor(IPF_clean$subject.ident)
+IPF_clean@meta.data$orig.ident %>% droplevels()
+IPF_clean <- IPF_clean %>%
+  mutate(orig.ident = paste0("IPFnuc", "_", orig.ident))
+IPF_clean$orig.ident %>% unique()
+# Adjust disease ident
+IPF_clean$disease.ident %>% unique()
+table(IPF_clean$orig.ident, IPF_clean$disease.ident)
+```
+
+### Load PPFE data
+```{r}
+# PPFE object already in the working environment
+CellDimPlot(IPF_clean, group.by = "renamedFinal", raster = F, label = T, label_insitu = T)
+CellDimPlot(IPF_clean, group.by = "orig.ident", raster = F, label = F, label_insitu = F, legend.position = "none")
+CellDimPlot(IPF_clean, group.by = "disease.ident", raster = F, label = F, label_insitu = F)
+```
+
+## Adjust the gene annotation among datasets
+```{r}
+###########
+# translate human gene to mouse and vice versa
+library(biomaRt)
+# GRCh38.p12 (this is what i mapped against) is Ensemble97 (July 2019)
+listEnsemblArchives()
+# http://jul2019.archive.ensembl.org
+# listDatasets(useMart("ensembl", host="http://jul2019.archive.ensembl.org"))
+
+ensembl <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl")
+
+# get all possible genetypes for trannslation among databases
+allfilters <- filterOptions("biotype",ensembl)
+
+# human_mart_IPF_optA
+ensembl_103 <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", host = "https://feb2021.archive.ensembl.org")
+ensembl_genes_103 <- getBM(attributes = c('ensembl_gene_id', 'hgnc_symbol', 'external_gene_name', 'gene_biotype'),
+                         filters = 'biotype', 
+                         values = allfilters,
+                         mart = ensembl_103)
+
+# PPFE 10X Version
+ensembl_98 <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", host = "https://sep2019.archive.ensembl.org")
+ensembl_genes_98 <- getBM(attributes = c('ensembl_gene_id', 'hgnc_symbol', 'external_gene_name', 'gene_biotype'),
+                         filters = 'biotype', 
+                         values = allfilters,
+                         mart = ensembl_98)
+
+# Check on DIfferences among ensembl versions
+match_genes <- function(ipf_genes, ensembl_genes) {
+  # irect matching
+  common_genes <- ipf_genes[ipf_genes %in% ensem$external_gene_name]
+  missing_genes <- ipf_genes[!ipf_genes %in% ensembl_genes$external_gene_name]
+  
+  # Correct "-" to "_" and check again
+  corrected_genes <- gsub("-", "_", missing_genes)
+  common_genes_corrected <- corrected_genes[corrected_genes %in% ensembl_genes$external_gene_name]
+  missing_genes_after_correction <- corrected_genes[!corrected_genes %in% ensembl_genes$external_gene_name]
+  
+  # Strip suffixes and check again
+  stripped_genes <- sub("\\..*", "", missing_genes_after_correction)
+  common_genes_stripped <- stripped_genes[stripped_genes %in% ensembl_genes$external_gene_name]
+  final_missing_genes <- stripped_genes[!stripped_genes %in% ensembl_genes$external_gene_name]
+  
+  # Compute intermediate sets
+  common_before_correction <- setdiff(missing_genes, missing_genes_after_correction)
+  common_before_stripping <- setdiff(missing_genes_after_correction, final_missing_genes)
+  
+  # Combine results
+  all_common_genes <- unique(c(common_genes, common_genes_corrected, common_genes_stripped))
+  
+  # Summary
+  list(
+    common = all_common_genes,
+    final_missing = final_missing_genes,
+    common_before_correction = common_before_correction,
+    common_before_stripping = common_before_stripping,
+    bindestr_genes = common_genes_corrected,
+    strip_genes = common_genes_stripped,
+    orig_missing = missing_genes
+  )
+}
+
+IPF_genes_raw <- rownames(IPF_clean) 
+
+# Apply the function for Ensembl 103
+result_103 <- match_genes(IPF_genes_raw, ensembl_genes_103)
+```
+
+## Relabel IPF
+```{r}
+IPF4PPFEint <- IPF_clean
+DefaultAssay(IPF4PPFEint) <- "RNA"
+
+# Extract current gene names
+current_gene_names <- rownames(IPF4PPFEint)
+
+
+########## adjust the gene labels
+# List of specific genes to process
+genes_to_correct__ <- result_103$common_before_correction
+
+# Strip the suffix only from the specific genes
+corrected_gene_names <- ifelse(current_gene_names %in% genes_to_correct__, 
+                               gsub("-", "_", current_gene_names), 
+                               current_gene_names)
+# List of specific genes to process
+genes_to_strip <- result_103$common_before_stripping
+
+# Strip the suffix only from the specific genes
+corrected_gene_names <- ifelse(corrected_gene_names %in% genes_to_strip, 
+                               sub("\\..*", "", corrected_gene_names), 
+                               corrected_gene_names)
+
+as.data.frame(corrected_gene_names) %>% view()      
+#######################
+
+
+# Merge to create a mapping table
+gene_mapping <- merge(ensembl_genes_98, ensembl_genes_103, by = "ensembl_gene_id", suffixes = c("_98", "_103"))
+gene_mapping
+
+# Map old gene names to new ones
+new_gene_names <- gene_mapping$external_gene_name_98[match(corrected_gene_names, gene_mapping$external_gene_name_103)]
+as.data.frame(new_gene_names) %>% view()
+
+# Convert the feature names in the PPFE object
+convertRownames <- function(seu_object) {
+  new_rownames <- new_gene_names
+  rownames(seu_object@assays$RNA@counts) <- new_rownames
+  rownames(seu_object@assays$RNA@data) <- new_rownames
+  features_keep <- rownames(seu_object)[!is.na(rownames(seu_object))]
+  obj_new <- subset(seu_object, features = features_keep)
+  rownames(obj_new@assays$RNA@meta.features) <- rownames(obj_new)
+  return(obj_new)
+}
+
+# Convert gene names in srt obj
+IPF4PPFEint <- convertRownames(IPF4PPFEint)
+
+# Check Intersection of genes
+common_genes <- intersect(rownames(PPFE_myeloid_int_clean), rownames(IPF4PPFEint))
+
+# Reduce Object to common genes
+IPF4PPFEint <- DietSeurat(IPF4PPFEint, assays = "RNA",features = common_genes, dimreducs = c("pca", "umap"))
+
+# Save
+saveRDS(IPF4PPFEint, "Mes_IPF4PPFEint_GRCH38_v98features_PPFEoverlapgenes.rds")
+```
+
+## Final Gene Check
+```{r}
+length(rownames(PPFE_Epi_int_final))
+length(rownames(IPF4PPFEint))
+
+common_genes <- intersect(rownames(PPFE_Epi_int_final), rownames(IPF4PPFEint))
+length(common_genes)
+
+# Find distinct genes (present in one but not both datasets)
+distinct_genes <- setdiff(rownames(PPFE_Epi_int_final), common_genes)
+
+# View the distinct genes
+distinct_genes
+```
+
+## Prepare PPFE
+```{r}
+PPFE4IPFint <- DietSeurat(PPFE_myeloid_int_clean, assays = "RNA",features = common_genes, dimreducs = c("pca", "umap"))
+```
+
+
+## Integration
+```{r}
+PPFE4IPFint$Project <- "PPFE"
+IPF4PPFEint$Project <- "IPF"
+
+# Create Subject List for integration
+PPFE_lympho.list <- SplitObject(PPFE4IPFint, split.by = "orig.ident")
+IPF_lympho.list <- SplitObject(IPF4PPFEint, split.by = "orig.ident")
+```
+
+```{r}
+# merge the lists
+lympho.list <- c(PPFE_lympho.list, IPF_lympho.list)
+rm(PPFE_lympho.list)
+rm(IPF_lympho.list)
+```
+
+
+```{r}
+lympho.list <- lapply(X = lympho.list, FUN = function(x) {
+    x <- NormalizeData(x, verbose = FALSE)
+    x <- FindVariableFeatures(x, verbose = FALSE, nfeatures = 2000)
+}) 
+```
+
+
+```{r}
+features <- SelectIntegrationFeatures(object.list = lympho.list)
+
+## remove mito genes as integrator
+features <- features[-grep("MT-", features)]
+```
+
+```{r}
+lympho.list <- lapply(X = lympho.list, FUN = function(x) {
+    x <- ScaleData(x, features = features, vars.to.regress = c("nCount_RNA"), verbose = FALSE)
+    x <- RunPCA(x, features = features, verbose = FALSE, npcs = 50) # 50 Dims did not work out
+})
+```
+
+```{r}
+# Find Integration anchors
+anchors <- FindIntegrationAnchors(object.list = endo.list, 
+                                  reduction = "rpca",
+                                  reference = c(1:59)) # PPFE-CTRL as Reference Dataset
+```
+
+```{r}
+test_final <- IntegrateData(anchorset = anchors, k.weight = 30)
+```
+
+#=================
+
+# E.) Downstream
+
+### Reclustering
+```{r}
+test_final <- test_final %>%
+  mutate(percent.mt.n = case_when(Project == "IPF" ~ percMito,
+                                Project == "PPFE" ~ percent.mt)
+         )
+
+```
+
+```{r}
+test_final <- ScaleData(test_final, verbose = FALSE, vars.to.regress="percent.mt.n")
+test_final <- RunPCA(test_final, verbose = FALSE, npcs = 50)
+test_final <- RunUMAP(test_final, dims = 1:50)
+test_final <- FindNeighbors(test_final, reduction = "pca", dims = 1:50)
+test_final <- FindClusters(test_final, resolution = c(1,1.2,1.4, 1.6, 1.8, 2))
+```
+
+
+
+```{r, fig.width=13, fig.height=18}
+#library(SC3)
+
+# Assuming BOS_Epi_clean_int is your data
+# Replace it with your actual data if it's named differently
+
+# Specify the number of PCs per heatmap
+pcs_per_heatmap <- 9
+
+# Loop through dimensions in groups of 9
+for (start_dim in seq(1, 50, pcs_per_heatmap)) {
+  end_dim <- min(start_dim + pcs_per_heatmap - 1, 50)
+  
+  # Subset dimensions for the current heatmap
+  dims_subset <- start_dim:end_dim
+  
+  # Create a PCHeatmap for the current group of dimensions
+  PCHeatmap(test_final, cells = 200, balanced = TRUE, dims = dims_subset)
+  
+  # Add a newline between groups
+  cat("\n")
+}
+
+```
+
+
+```{r, fig.width=14}
+test_final <- RunUMAP(object = test_final, dims = 1:50, reduction = "pca", reduction.name = "ReUMAP_50", reduction.key = "ReUMAP_50")
+test_final <- RunUMAP(object = test_final, dims = 1:30, reduction = "pca", reduction.name = "ReUMAP_30", reduction.key = "ReUMAP_30")
+test_final <- RunUMAP(object = test_final, dims = 1:20, reduction = "pca", reduction.name = "ReUMAP_20", reduction.key = "ReUMAP_20")
+test_final <- RunUMAP(object = test_final, dims = 1:15, reduction = "pca", reduction.name = "ReUMAP_15", reduction.key = "ReUMAP_15")
+test_final <- RunUMAP(object = test_final, dims = 1:11, reduction = "pca", reduction.name = "ReUMAP_11", reduction.key = "ReUMAP_11")
+test_final <- RunUMAP(object = test_final, dims = 1:12, reduction = "pca", reduction.name = "ReUMAP_12", reduction.key = "ReUMAP_12")
+test_final <- RunUMAP(object = test_final, dims = 1:8, reduction = "pca", reduction.name = "ReUMAP_08", reduction.key = "ReUMAP_08")
+test_final <- RunUMAP(object = test_final, dims = 1:9, reduction = "pca", reduction.name = "ReUMAP_09", reduction.key = "ReUMAP_09")
+test_final <- RunUMAP(object = test_final, dims = 1:10, reduction = "pca", reduction.name = "ReUMAP_10", reduction.key = "ReUMAP_10")
+test_final <- RunUMAP(object = test_final, dims = 1:7, reduction = "pca", reduction.name = "ReUMAP_07", reduction.key = "ReUMAP_07")
+test_final <- RunUMAP(object = test_final, dims = 1:5, reduction = "pca", reduction.name = "ReUMAP_05", reduction.key = "ReUMAP_05")
+```
+
+## DEGs
+```{r}
+Idents(test_final) <- "integrated_snn_res.2"
+Epi_Degs_Final_res1 <- FindAllMarkers(object = test_final, assay = "RNA", logfc.threshold = 1.5, only.pos = T)
+```
+```{r}
+Epi_Degs_Final_res1 <- Epi_Degs_Final_res1[with(Epi_Degs_Final_res1, avg_log2FC > 0.3 & p_val_adj < 0.05), ] 
+
+Epi_Degs_Final_res1 <- Epi_Degs_Final_res1 %>%
+  group_by(cluster) %>%
+  slice_max(n = 100, order_by = avg_log2FC)
+writexl::write_xlsx(Epi_Degs_Final_res1, file.path(folder,"PPFE_IPF_DEGs_Myeloid_Cleaned_res2_final.xlsx"))
+Epi_Degs_Final_res1
+```
+
+### Rename Clusters
+```{r}
+test_final <- SCP::RenameClusters(test_final, group.by = "integrated_snn_res.2", 
+  nameslist = c("Monocyte_derived_Macrophage", #0
+               "Alveolar_Macrophage", #1 
+               "Monocyte_nonClassical", #10
+               "Fibrotic_Macrophage", #11
+               "Monocyte_derived_Macrophage", #12
+               "Monocyte_Classical", #13 # könnten auch MAIT sein ! 
+               "Mast", #14
+               "Junk", #15
+               "Monocyte_Classical", #16 # Junk ?S
+               "DC2", #17
+               "DC2", #18
+               "Monocyte_nonClassical", #19
+               "Junk", #2 no DEGs ! 
+               "Monocyte_Classical", #20
+               "Monocyte_derived_Macrophage", #21
+               "IFNresp_Monocyte_derived_Macrophage", #22
+                "Mast", #23
+                "DC1", #24
+                 "Monocyte_derived_Macrophage", #25
+                 "Mast", #26
+                 "Mast", #27
+                "Neutro", #28
+                "DC2", #29
+                "Alveolar_Macrophage", # 3
+                 "Monocyte_derived_Macrophage", # 30
+                 "Mast", # 31
+                "Fibrotic_Macrophage", # 32 # SPP1 Expression !
+                "Monocyte_Classical", # 33
+                 "DC2", # 34
+                 "pDC", # 35
+                "Macrophage_Cycling", # 36
+                "Neutro", # 37
+                "Alveolar_Macrophage", # 38
+                "Langerhans-Cells", # 39
+                 "Monocyte_derived_Macrophage", # 4
+                 "Monocyte_derived_Macrophage", # 40
+                 "Monocyte_Classical", # 41
+                 "Fibrotic_Macrophage", # 42
+                 "Junk", # 43
+                 "Mast", # 44
+                 "Monocyte_derived_Macrophage", # 45
+                 "Alveolar_Macrophage", # 46
+                 "Monocyte_Classical", # 47
+                 "Monocyte_Classical", # 48
+                 "Alveolar_Macrophage", # 49
+                 "Monocyte_derived_Macrophage", # 5 
+                 "Mast", # 50 
+                 "Monocyte_derived_Macrophage", # 51 
+                  "Junk", # 6 
+                 "Fibrotic_Macrophage", #  7 
+                 "Mast", # 8 
+                 "Monocyte_Classical" #9 
+                               ),name = "Celltype_ID_fine") 
+
+
+
+```
+```{r}
+test_final <- SCP::RenameClusters(test_final, group.by = "integrated_snn_res.2", 
+nameslist = c("Monocyte_derived_Macrophage", #0
+             "Alveolar_Macrophage", #1 
+             "Monocyte_nonClassical", #10
+             "Monocyte_derived_Macrophage", #11
+             "Monocyte_derived_Macrophage", #12
+             "Monocyte_Classical", #13 # könnten auch MAIT sein ! 
+             "Mast", #14
+             "Junk", #15
+             "Monocyte_Classical", #16 # Junk ?S
+             "DC2", #17
+             "DC2", #18
+             "Monocyte_nonClassical", #19
+             "Junk", #2 no DEGs ! 
+             "Monocyte_Classical", #20
+             "Monocyte_derived_Macrophage", #21
+             "Monocyte_derived_Macrophage", #22
+              "Mast", #23
+              "DC1", #24
+               "Monocyte_derived_Macrophage", #25
+               "Mast", #26
+               "Mast", #27
+              "Neutro", #28
+              "DC2", #29
+              "Alveolar_Macrophage", # 3
+               "Monocyte_derived_Macrophage", # 30
+               "Mast", # 31
+              "Monocyte_derived_Macrophage", # 32 # SPP1 Expression !
+              "Monocyte_Classical", # 33
+               "DC2", # 34
+               "pDC", # 35
+              "Macrophage_Cycling", # 36
+              "Neutro", # 37
+              "Alveolar_Macrophage", # 38
+              "Langerhans-Cells", # 39
+               "Monocyte_derived_Macrophage", # 4
+               "Monocyte_derived_Macrophage", # 40
+               "Monocyte_Classical", # 41
+               "Monocyte_derived_Macrophage", # 42
+               "Junk", # 43
+               "Mast", # 44
+               "Monocyte_derived_Macrophage", # 45
+               "Alveolar_Macrophage", # 46
+               "Monocyte_Classical", # 47
+               "Monocyte_Classical", # 48
+               "Alveolar_Macrophage", # 49
+               "Monocyte_derived_Macrophage", # 5 
+               "Mast", # 50 
+               "Monocyte_derived_Macrophage", # 51 
+                "Junk", # 6 
+               "Monocyte_derived_Macrophage", #  7 
+               "Mast", # 8 
+               "Monocyte_Classical" #9 
+                             ), name = "Celltype_ID_coarse") 
+
+
+
+```
+
+### Cleaning
+```{r}
+# remove Junk
+test_final_clean <- subset(test_final, Celltype_ID_coarse != "Junk")
+
+# Drop metadata levels
+test_final_clean@meta.data$Celltype_ID_coarse <- droplevels(test_final_clean@meta.data$Celltype_ID_coarse)
+test_final_clean@meta.data$Celltype_ID_fine <- droplevels(test_final_clean@meta.data$Celltype_ID_fine)
+```
+
+
+#=================
+
+# Adjust metadata col names
+```{r}
+# Unify Cohort label
+test_final_clean <- test_final_clean %>%
+  mutate(Cohort = case_when(Project == "PPFE" ~ Cohort,
+                            Project == "IPF" ~ "Belgium"),
+         orig.ident_final = case_when(Project == "PPFE" ~ orig.ident,
+                                Project == "IPF" ~ paste0("IPFnuc_",substr(orig.ident, start = 1, stop = 10)))
+         
+       )
+# Overwrite old orig.ident
+test_final_clean$orig.ident <- test_final_clean$orig.ident_final
+
+# introduce disease_cohort
+test_final_clean <- test_final_clean %>%
+  mutate(disease_cohort = paste(disease.ident, Cohort, sep = "_"),
+         disease.ident_cohort = case_when(Project == "PPFE" ~ paste0(test_final_clean$Cohort, "__", test_final_clean$disease.ident,
+                                           Project == "IPF" ~ "Belgium__IPF")
+                                          )
+         )
+
+# Move main celltype label to Celltype Col
+test_final_clean$Celltype <- test_final_clean$Celltype_ID_fine
+
+# "ReUMAP_10" = Reduction to use
+```
+
+# save
+```{r}
+saveRDS(test_final_clean, file.path(folder, "PPFE_Myeloid_Lineage.rds"))
+```

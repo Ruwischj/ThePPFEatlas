@@ -1,0 +1,151 @@
+---
+title: "PPFE_Downstream"
+author: "Jannik"
+date: "2024-14-03"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T,
+                      fig.width = 10,
+                      fig.height = 5,
+                      #dpi = 1200,
+                      dev = "png",
+                      cache = F)
+```
+
+```{r}
+# INfos
+## Dataset was created with 10X Flex Tech >> Lower UMIs, Features and Counts than Xenium ! 
+```
+
+```{r}
+library(SCP)
+library(Seurat)
+library(SeuratObject)
+library(dplyr)
+library(tidyverse)
+library(tidyseurat)
+```
+
+# Load_Dataset
+```{r}
+ppfe <- readRDS("./Merged_Dataset_B1_B2_ppfe.rpca.integrated_RPCA_cleaned_07_10_2024.rds") # RPCA Integrated PPFE Data from both batches
+```
+
+# Adjust Metadata
+```{r}
+ppfe <- ppfe %>% 
+  dplyr::mutate(disease.ident = case_when(disease.ident == "PPF" ~ "PPFE", .default = "CTRL"))
+```
+
+
+# DEGs
+```{r}
+Markers_0.2 <- FindAllMarkers(ppfe, group.by = "Seuratcorrected_snn_res.0.2", assay = "RNA", logfc.threshold = 1, only.pos = T)
+```
+
+### snn_0.2_res
+```{r}
+DEGs <- Markers_0.2
+DEGs <- DEGs[with(DEGs, avg_log2FC > 0.3 & p_val_adj < 0.05), ] 
+DEGs <- DEGs %>%
+  group_by(cluster) %>%
+  slice_max(n = 300, order_by = avg_log2FC)
+
+DEGs <- DEGs %>% 
+  mutate(Celltype_ID = case_when(cluster == 0 ~ "Fibroblasts",
+                                cluster == 1 ~ "CD4+TC",
+                                cluster == 2 ~ "CD8+TC",
+                                cluster == 3 ~ "AEC2",
+                                cluster == 4 ~ "AEC1",
+                                cluster == 5 ~ "Macrophages",
+                                cluster == 6 ~ "EC",
+                                cluster == 7 ~ "BC",
+                                cluster == 8 ~ "Macrophages",
+                                cluster == 9 ~ "SMC",
+                                cluster == 10 ~ "PC",
+                                cluster == 11 ~ "EC",
+                                cluster == 12 ~ "EC",
+                                cluster == 13 ~ "Mast",
+                                cluster == 14 ~ "Ciliated",
+                                cluster == 15 ~ "Club",
+                                cluster == 16 ~ "Lymphatics",
+                                cluster == 17 ~ "Basal",
+                                cluster == 18 ~ "Neutros",
+                                cluster == 19 ~ "Cycling_Immune",
+                                cluster == 20 ~ "Immune_Dbl",
+                                cluster == 21 ~ "AE_Endo_Dbl",
+                                cluster == 22 ~ "Mast_AE_Dbl")
+         )
+
+DEGs
+
+# save
+writexl::write_xlsx(DEGs, "DEGs_top300_annotated_ppfe_final_RPCA_int_SNN_0.2_Annoated.xlsx")
+```
+
+# 3.  Rename Cluster Identities
+```{r}
+#Change ident
+Idents(ppfe) <- "Seuratcorrected_snn_res.0.2"
+ppfe <- SCP::RenameClusters(ppfe, group.by = "Seuratcorrected_snn_res.0.2", name = "Lineage",
+                            nameslist = c(
+                              "Stroma", # 0
+                               "Immune",  #1
+                               "Immune", #10
+                               "Endothelium", #11
+                               "Endothelium", #12 
+                               "Immune", #13
+                               "Epithelium", #14 
+                               "Epithelium", #15
+                               "Endothelium", #16
+                               "Epithelium", #17
+                               "Immune", #18
+                              "Immune", # 19
+                             "Immune", # 2
+                              "Immune", # 20
+                              "Epithelium", # 21
+                              "Immune", #22 
+                               "Epithelium", #3
+                               "Epithelium", #4
+                               "Immune", # 5
+                               "Endothelium", #6
+                               "Immune", # 7
+                               "Immune", #8
+                               "Stroma") #9 
+                            )
+```
+
+# Save the dataset
+```{r}
+saveRDS(ppfe ,"ppfe_final_b1_b2_09_10_2024.rds")
+ppfe<- readRDS("ppfe_final_b1_b2_09_10_2024.rds")
+```
+
+#==================================
+
+# subset the lineages
+```{r}
+ppfe_epi <- subset(ppfe, Lineage == "Epithelium")
+saveRDS(ppfe_epi,  "PPFE_Epi_Lineage_raw.rds")
+rm(ppfe_epi)
+```
+
+```{r}
+ppfe_mes <- subset(ppfe, Lineage == "Stroma")
+saveRDS(ppfe_mes,  "PPFE_Mes_Lineage_raw.rds")
+rm(ppfe_mes)
+```
+
+```{r}
+ppfe_endo <- subset(ppfe, Lineage == "Endothelium")
+saveRDS(ppfe_endo,  "PPFE_Endo_Lineage_raw.rds")
+rm(ppfe_endo)
+```
+
+```{r}
+ppfe_imm <- subset(ppfe, Lineage == "Immune")
+saveRDS(ppfe_imm,  "PPFE_Endo_Immune_raw.rds")
+rm(ppfe_imm)
+```

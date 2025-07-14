@@ -1,0 +1,290 @@
+---
+title: "Fig_7_FreqPlots_Immune"
+author: "Jannik Ruwisch"
+date: "2025-01-27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T,
+                      fig.width = 14,
+                      fig.height = 7,
+                      dev = "png",
+                      cache = F,
+                      fig.path= "C:/Users/Jannik/OneDrive/PNE_MHH/AG_Prasse_OneDrive/PPFE/PPFE_Nuc_Seq/Batch_integration/ppfe_epithelium/")
+```
+
+```{r}
+library(SCP)
+library(Seurat)
+library(SeuratObject)
+library(dplyr)
+library(tidyverse)
+library(tidyseurat)
+library(ggpubr)
+```
+
+```{r}
+# Start from here...
+test <- readRDS("./PPFE_global_object.rds")
+
+# Create hybrid label comprising lymphoid celltypes and rest of lineages
+test <- test %>% 
+  mutate(Celltype_Immune = case_when(Lineage == "Lymphoid" ~ Celltype_ID_final,
+                                     .default = Lineage))
+
+```
+
+# Color Palette Settings
+```{r}
+# Adjust to hybrid label
+pal_cluster_scp_pal <- SCP::palette_scp(x = c(
+  "Epithelium", "Mesenchyme", "Endothelium", "Myeloid",
+  "Treg",
+  "CD4+_TC_naive",
+  "CD4+_TC_effector_memory",
+  "CD4+_TC_TH1",
+  "CD4+_TC_TH17",
+  "ILC3",
+  "CD4+_TC_Cytotoxic",
+  "CD8+_TC_effector_memory",
+  "CD8+_TC_resident_memory",
+  "gamma_delta_TC", 
+  "NK_Cells_CD16-" ,
+  "NK_Cells_CD16+",
+  "Plasma_Cells",
+  "B_Cells_naive",
+  "B_Cells_memory"), matched = T, palcolor = c("lightgrey", "grey", "grey60","grey45",
+  "#8DD3C7", "#E6F5B7", "#D9D7C9", "#D3A5B4", "#E9877F",
+  "#88ADCC", "#D9B382", "#D8C965", "#C7D98C", "#F9CDE4",
+  "#DED7DA", "#C69FC7", "#C2ADC0", "#D6EBB2", "#FFED6F")
+)
+
+pal_dis_pal <- palette_scp(x = test$disease.ident%>% unique(), palcolor = c("royalblue", "red3", "#ffd59b"), matched = F)
+pal_cohort_pal_heat <- palette_scp(x = c("Germany", "France",  "Belgium"), palcolor = c("grey88", "grey58", "grey18"), matched = F)
+pal_cohort_pal <-  c("royalblue", "red1", "darkred", "#ffd59b")
+pal_subject_pal <-  palette_scp(palette = "igv", x = test$orig.ident_final %>% unique(), matched = F) 
+```
+
+#===============
+
+# Cellfrequency Plot
+
+```{r, fig.width=14, fig.height=7}
+# Proportion / cell number composition per cluster
+ggData = data.frame(prop.table(table(test$Celltype_Immune, test$orig.ident_final), margin = 2))
+colnames(ggData) = c("Celltype_ID", "Orig.Ident",  "value")
+
+ggData <- ggData %>%
+ mutate(Disease = substr(Orig.Ident, 1,4))
+
+subset(test, disease.ident_cohort == "France__PPFE")$orig.ident_final %>% unique()-> Batch2_Fren_IDs 
+subset(test, disease.ident_cohort == "Germany__PPFE")$orig.ident_final %>% unique()-> BAtch1_Han_IDs 
+subset(test, disease.ident == "CTRL")$orig.ident_final %>% unique()-> CTRL_ids
+
+
+ggData <- ggData %>%
+ mutate(Disease = case_when(Orig.Ident %in% Batch2_Fren_IDs ~ "France_PPFE",
+                            Orig.Ident %in% BAtch1_Han_IDs ~ "Germany_PPFE",
+                            Orig.Ident %in% CTRL_ids ~ "Germany_CTRL",
+                            .default = "IPF_Belgium")
+ )
+
+ggData$Disease <- factor(ggData$Disease, levels = c("Germany_CTRL", "France_PPFE", "Germany_PPFE",  "IPF_Belgium"))
+
+
+
+
+test$Celltype_Immune %>% unique() -> Celltypes
+
+cluster_scp_pal <- pal_cluster_scp_pal
+patient_order <- ggData %>%
+  dplyr::filter(Celltype_ID == 'B_Cells_memory') %>%
+   arrange(Disease,desc(value)) %>%
+  pull(Orig.Ident)
+
+# Convert Patient_ID to a factor with the specific order
+ggData$Orig.Ident <- factor(ggData$Orig.Ident, levels = patient_order)
+
+
+# Calculate median values for each Celltype_ID within each Disease group
+medians <- ggData %>%
+  dplyr::filter(Disease =="Germany_PPFE") %>%
+  group_by(Disease, Celltype_ID) %>%
+  summarize(median_value = median(value)) %>%
+  ungroup()
+
+# Order Celltype_ID based on median values
+ordered_celltypes <- medians %>%
+  group_by(Celltype_ID) %>%
+  summarize(overall_median = median(median_value)) %>%
+  arrange(overall_median) %>%
+  pull(Celltype_ID)
+ordered_celltypes
+
+# Update the levels of Celltype_ID in ggData
+ggData$Celltype_ID <- factor(ggData$Celltype_ID, levels = c(
+  "Epithelium", "Mesenchyme", "Endothelium", "Myeloid",
+  "Treg",
+  "CD4+_TC_naive",
+  "CD4+_TC_effector_memory",
+  "CD4+_TC_TH1",
+  "CD4+_TC_TH17",
+  "ILC3",
+  "CD4+_TC_Cytotoxic",
+  "CD8+_TC_effector_memory",
+  "CD8+_TC_resident_memory",
+  "gamma_delta_TC", 
+  "NK_Cells_CD16-" ,
+  "NK_Cells_CD16+",
+  "Plasma_Cells",
+  "B_Cells_naive",
+  "B_Cells_memory")
+                             )
+
+# Convert disease.ident and Celltype to factors
+ggData_imm <- subset(ggData, Celltype_ID != "Epithelium" & 
+                     Celltype_ID != "Mesenchyme" & 
+                     Celltype_ID != "Endothelium" &
+                     Celltype_ID != "Myeloid") 
+
+
+ggData_imm$Disease <- as.factor(ggData_imm$Disease)
+ggData_imm$Celltype_ID <- as.factor(ggData_imm$Celltype_ID)
+
+# Calculate the median frequency for each cell type
+median_frequencies <- ggData_imm %>%
+  group_by(Celltype_ID) %>%
+  summarize(median_freq = median(value)) %>%
+  arrange(-median_freq)
+
+# Reorder the Celltype factor levels based on median frequency
+ggData_imm$Celltype_ID <- factor(ggData_imm$Celltype_ID, levels = median_frequencies$Celltype_ID)
+
+# Plot
+p <- ggplot(ggData_imm, aes(x = Celltype_ID, y = value, fill = Disease)) +
+  geom_boxplot(outlier.shape = NA) +
+  labs(title = "Relative Lymphoid Celltype Frequencies",
+       x = "Cell Type",
+       y = "Frequency (%)") +
+  scale_fill_manual(values = pal_cohort_pal) +
+  scale_color_manual(values = pal_cohort_pal) +
+  theme_scp() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Add statistical comparisons
+p + stat_compare_means(aes(group = Disease),
+                       label = "p.signif")
+
+# Export PDF 
+pdf(file.path(folder,"Figure_7_Boxplots_alll.pdf"),  height = 7, width = 9)
+p
+dev.off()
+```
+
+## Split Plots
+```{r}
+ggData_1 <- subset(ggData_imm, Celltype_ID != "Plasma_Cells" & 
+                     Celltype_ID != "B_Cells_memory" &
+                     Celltype_ID != "CD4+_TC_effector_memory" & 
+                     Celltype_ID != "CD4+_TC_naive" &
+                     Celltype_ID != "NK_Cells_CD16+" &
+                     Celltype_ID != "CD8+_TC_effector_memory"&
+                     Celltype_ID != "Treg") 
+
+# Calculate the median frequency for each cell type
+median_frequencies <- ggData_1 %>%
+  group_by(Celltype_ID) %>%
+  summarize(median_freq = median(value)) %>%
+  arrange(-median_freq)
+
+# Reorder the Celltype factor levels based on median frequency
+ggData_1$Celltype_ID <- factor(ggData_1$Celltype_ID, levels = median_frequencies$Celltype_ID)
+
+# Plot
+p <- ggplot(ggData_1, aes(x = Celltype_ID, y = value, fill = Disease)) +
+  geom_boxplot(outlier.shape = NA
+    ) +
+  labs(title = NULL,
+       x = "Cell Type",
+       y = "Frequency (%)") +
+  scale_fill_manual(values = pal_cohort_pal) +
+  scale_color_manual(values =pal_cohort_pal) +
+  theme_scp(aspect.ratio = 1) + 
+  theme(axis.text.x = element_text(angle = 70, hjust = 1))#+ylim(0, 0.1)
+
+# Add statistical comparisons
+p1 <- p + stat_compare_means(aes(group = Disease),
+                            label = "p.signif")
+
+ggData_2 <- subset(ggData_imm, Celltype_ID == "Plasma_Cells" | 
+                     Celltype_ID == "B_Cells_memory" |
+                     Celltype_ID == "CD4+_TC_effector_memory" | 
+                     Celltype_ID == "CD4+_TC_naive" |
+                     Celltype_ID == "NK_Cells_CD16+" |
+                     Celltype_ID == "CD8+_TC_effector_memory"|
+                     Celltype_ID == "Treg")
+
+# Calculate the median frequency for each cell type
+median_frequencies <- ggData_2 %>%
+  group_by(Celltype_ID) %>%
+  summarize(median_freq = median(value)) %>%
+  arrange(-median_freq)
+
+# Reorder the Celltype factor levels based on median frequency
+ggData_2$Celltype_ID <- factor(ggData_2$Celltype_ID, levels = median_frequencies$Celltype_ID)
+
+# Plot
+p <- ggplot(ggData_2, aes(x = Celltype_ID, y = value, fill = Disease)) +
+  geom_boxplot(outlier.shape = NA) +
+  labs(title =NULL,
+       x = "Cell Type",
+       y = "Frequency (%)") +
+ scale_fill_manual(values = pal_cohort_pal) +
+  scale_color_manual(values = pal_cohort_pal) +
+  theme_scp(aspect.ratio = 1) +
+  theme(axis.text.x = element_text(angle = 70, hjust = 1))
+
+# Add statistical comparisons
+p2 <- p + stat_compare_means(aes(group = Disease), 
+                            label = "p.signif")
+
+# Print together
+p <- ggarrange(plotlist = list(p2, p1), ncol = 2, common.legend = T, align = "h")
+
+pdf(file.path(folder,"Figure_7_Boxplots_split.pdf"),  height = 7, width = 9)
+p
+dev.off()
+```
+
+## Wilcox Rank Sum Test
+```{r}
+library(rstatix)
+library(writexl)
+summary_df <- ggData %>%
+  group_by(Celltype_ID, Disease) %>%
+  summarise(
+    mean_value = mean(value, na.rm = TRUE),
+    sd_value = sd(value, na.rm = TRUE)
+  ) %>%
+  ungroup()
+write_xlsx(summary_df, file.path(folder, "PPFE_IPF_Immune_by_celltype_freq.xlsx"))
+
+wilcox_results <- ggData %>%
+  group_by(Celltype_ID) %>%
+  wilcox_test(value ~ Disease) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance("p.adj") %>%
+  ungroup()
+
+wilcox_results
+write_xlsx(wilcox_results, file.path(folder, "PPFE_IPF_Immune_by_celltype_freq_wilcox.xlsx"))
+
+
+final_df <- summary_df %>%
+  left_join(wilcox_results, by = "Celltype_ID")
+final_df
+
+library(writexl)
+write_xlsx(final_df, file.path(folder, "PPFE_IPF_Immune_by_celltype_freq_Wilcox_rank_sum_test_merged.xlsx"))
+```

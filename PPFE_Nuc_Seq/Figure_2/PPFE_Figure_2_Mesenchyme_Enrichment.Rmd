@@ -1,0 +1,304 @@
+---
+title: "PPFE_IPF_Mes_Enrichment"
+author: "Jannik_Ru"
+date: "2025-01-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T,
+                      fig.width = 14,
+                      fig.height = 7,
+                      #dpi = 1200,
+                      dev = "png",
+                      cache = F)
+```
+
+# Prequisite
+```{r}
+# Adventitial-like fibroblasts were later labeled as Elstofibrotic Fibroblasts in the Manuscript
+```
+
+# Load Packages
+```{r}
+library(SCP)
+library(Seurat)
+library(ggplot2)
+library(ggplot2)
+library(matrixStats)
+library(dplyr)
+library(tidyseurat)
+library(readxl)
+library(writexl)
+library(SeuratWrappers)
+```
+
+```{r}
+PPFE_mes <- readRDS("./PPFE_Mes_Lineage.rds") 
+```
+
+#=============
+
+# Enrichment Analyse
+
+## GOA
+```{r, fig.width=14}
+# Remove IPF and CTRL
+PPFE_mes <- subset(PPFE_mes, disease.ident == "PPFE")
+
+# Run DE Test based on MAST
+PPFE_mes  <- RunDEtest(srt = PPFE_mes, 
+                       group_by = "Celltype_ID_final_coarse", 
+                       fc.threshold = 1.5, 
+                       only.pos = FALSE, 
+                       test.use = "MAST")
+# Run GOA Analysis
+PPFE_mes  <- RunEnrichment(
+  srt = PPFE_mes , 
+  group_by = "Celltype_ID_final_coarse", 
+  db = c("KEGG", "WikiPathway", "Reactome","GO_BP", "MSigDB") , 
+  species = "Homo_sapiens", 
+  DE_threshold = "avg_log2FC > log2(1.5) & p_val_adj < 0.05",
+  test.use = "MAST") # Get DE Genes from MAST DEG Slot in the tools subdir of S4 Object
+
+# Assign Color Palette
+SCP::palette_scp(palcolor = c("#e31a1c", "#fb9a99","#cab2d6","#6a3d9a"),
+                 x =  list("Subpleural_Fb", "Adventitial_Fb","Adventitial_like_Fb","CTHRC1_MyoFb" , n = 4), matched = T) -> palcol
+```
+
+#=============
+
+## Barplots 
+
+### Subpleural Fb
+```{r, fig.height=14, fig.width=10}
+p <- EnrichmentPlot(
+  srt = PPFE_mes , group_by = "Celltype_ID_final_coarse", group_use = c("Subpleural_Fb"), 
+  test.use = "MAST", 
+  color_by = "Groups", 
+  palcolor = "#fb9a99", 
+  plot_type = "bar", 
+  topTerm = 15,  
+  db = c("Reactome"), # Filter for Reactome
+  combine = T, 
+  ncol = 1, nrow = 4, lineheight = 0.9, character_width = 90, 
+)
+p
+
+# Export Plot
+png("PPFE_mes_EnrichBarPlot_map_GOA_Reactome_SubleuralFb.png", res = 1200, units = "in", width = 14, height = 6)
+p
+dev.off()
+```
+
+### Adventitial_Fb
+```{r}
+# Enrichment Plot
+p <- EnrichmentPlot(
+  srt = PPFE_mes , group_by = "Celltype_ID_final_coarse", 
+  group_use = c("Adventitial_Fb"), 
+  test.use = "MAST", 
+  color_by = "Groups", 
+  palcolor = "#6a3d9a", 
+  plot_type = "bar", 
+  topTerm = 15,  
+  db = c("Reactome"), # Filter for Reactome
+  combine = T, 
+  ncol = 1, nrow = 4, lineheight = 0.9, character_width = 90, 
+)
+p
+
+# Export as PNG 
+png("PPFE_mes_EnrichBarPlot_map_GOA_Reactome_AdvntlFb.png", 
+    res = 1200, units = "in", 
+    width = 14, height = 6)
+dev.off()
+```
+
+### Adventitial-like Fb | Elastofibroblast Fb
+```{r}
+p <- EnrichmentPlot(
+  srt = PPFE_mes , 
+  group_by = "Celltype_ID_final_coarse", 
+  group_use = c("Adventitial_like_Fb"), 
+  test.use = "MAST", 
+  color_by = "Groups", 
+  palcolor = "#cab2d6", 
+  plot_type = "bar", 
+  topTerm = 15,  
+  db = c("Reactome"), 
+  combine = T, 
+  ncol = 1, nrow = 4, lineheight = 0.9, character_width = 90, 
+)
+p
+
+# Export as PNG 
+png("PPFE_mes_EnrichBarPlot_map_GOA_Reactome_Advntl_likeFb.png", 
+    res = 1200, units = "in", width = 14, height = 6)
+p
+dev.off()
+```
+
+### CTHRC1_fibrotic_Fb
+```{r}
+p <- EnrichmentPlot(
+  srt = PPFE_mes , group_by = "Celltype_ID_final_coarse", group_use = c("CTHRC1_MyoFb"), 
+  test.use = "MAST", 
+  color_by = "Groups", 
+  palcolor = "#e31a1c", 
+  plot_type = "bar", 
+  topTerm = 15,  
+  db = c("Reactome"), 
+  combine = T, 
+  ncol = 1, nrow = 4, lineheight = 0.9, character_width = 90, 
+)
+p
+
+png("PPFE_mes_EnrichBarPlot_map_GOA_Reactome_MyoFb.png", res = 1200, units = "in", width = 14, height = 6)
+p
+dev.off()
+```
+
+#==============
+## Enrichmap-Plots (Figure S4)
+
+### GOA Enrichmap Plot - Adventitial-like Fb | Elastofibroblast Fb
+```{r, fig.width=14, fig.height=14}
+# Calculate Enrichmap
+p <- EnrichmentPlot(
+  srt = PPFE_mes, group_by = "Celltype_ID_final_coarse", group_use = "Adventitial_like_Fb", db = "Reactome",
+  enrichmap_labelsize = 10,
+  plot_type = "enrichmap", enrlichmap_nlabel = 10, topTerm = 30)+
+  Seurat::DarkTheme()+ theme( panel.background = element_rect(fill = "white"),
+                      axis.ticks = element_blank(),
+                      axis.text = element_blank())
+
+# Export greedy clusters from plot 
+p[["layers"]][[1]][["data"]] -> res_enrich_GOA_clusetred
+write_xlsx(res_enrich_GOA_clusetred, "res_enrich_GOA_clustered_Adventitial_like_Fb.xlsx")
+
+# Export Plot
+png("PPFE_mes_Enrichmap_map_GOA_Reactome_Adv_like.png", res = 300, units = "in", width = 18, height = 10)
+p
+dev.off()
+
+pdf(file = "PPFE_mes_Enrichmap_map_GOA_Reactome_Adv_like.pdf", width = 26, height = 18)
+p
+dev.off()
+```
+
+#### Enrichmap - Cluster C4 as Network
+```{r}
+# Filter the GOA Dataframe according to Cluster of interst 
+res_enrich_GOA_clusetred %>% filter(clusters == "C3") -> filtered_df
+
+# Export original Enrichment Results from Seurat Object ! 
+PPFE_mes@tools$Enrichment_Celltype_ID_final_coarse_wilcox -> enrich
+enrich_enrichment <- enrich$enrichment
+
+# Filter orinigal enrichment dataframe for Genset IDs occuring in the Cluster of interst from the enrichmap 
+enrich$enrichment <- enrich_enrichment[enrich_enrichment$ID %in% filtered_df$name,]
+
+# Plot the Network Plot per Cluster 
+pc4 <- EnrichmentPlot(
+  res = enrich,  
+  group_use = "Adventitial_like_Fb", 
+  db = "Reactome",
+  plot_type = "network", 
+  enrlichmap_nlabel = 8, 
+  topTerm = 300)+
+  DarkTheme()+ 
+  theme(axis.line = element_line(colour = "black"),
+                      plot.title = ggplot2::element_text(size = 20, face = "bold"),
+                      panel.grid.major = element_blank(),
+                      panel.grid.minor = element_blank(),
+                      panel.border = element_blank(),
+                      panel.background = element_blank(), 
+                      axis.text = element_blank(),   # Remove axis text
+                      axis.ticks = element_blank(),
+                      strip.text = element_text(size = 16, face = "bold", colour = "white"),
+                      strip.background = element_blank(),  # Remove facet background
+                      panel.spacing = unit(1, "lines"),  # Remove space between facets
+                      plot.margin = margin(0, 0, 0, 0) 
+                      )
+png("PPFE_mes_Enrichmap_GOA_Reactome_Adv_like_fb_C4.png", res = 600, units = "in", width = 18, height = 10)
+pc4
+dev.off()
+
+pdf(file = "PPFE_mes_Enrichmap_GOA_Reactome_Adv_like_fb_C4.pdf",width = 10, height = 6, bg = "black")
+pc4
+dev.off()
+```
+
+
+### GOA Enrichmap Plot - Adventitial_Fb
+```{r, fig.width=14}
+p <- EnrichmentPlot(
+  srt = PPFE_mes, group_by = "Celltype_ID_final_coarse", group_use = "Adventitial_Fb", db = "Reactome", enrichmap_labelsize = 9,
+  plot_type = "enrichmap", enrlichmap_nlabel = 50, topTerm = 50#
+)+DarkTheme()+ theme( panel.background = element_rect(fill = "white"),
+                      axis.ticks = element_blank(),
+                      axis.text = element_blank())
+
+# Export greedy clusters from plot 
+p[["layers"]][[1]][["data"]] -> res_enrich_GOA_clusetred
+write_xlsx(res_enrich_GOA_clusetred, "res_enrich_GOA_clustered_Adventitial_Fb.xlsx")
+
+# Plot
+png("PPFE_mes_Enrichmap_map_GOA_Reactome_AdvFb.png", res = 300, units = "in", width = 18, height = 10)
+p
+dev.off()
+
+pdf(file = "PPFE_mes_Enrichmap_map_GOA_Reactome_AdvFb.pdf", width = 22, height = 14)
+p
+dev.off()
+```
+
+#### Enrichmap Cluster C1 as network plot (Figure 2K)
+```{r, fig.width=10, fig.height=10}
+# Filter the GOA Dataframe according to Cluster of interst 
+res_enrich_GOA_clusetred %>% filter(clusters == "C1") -> filtered_df
+
+# Export original Enrichment Results from Seurat Object ! CAVE Don't use simple enrichment dataframe ! 
+PPFE_mes@tools$Enrichment_Celltype_ID_final_coarse_wilcox -> enrich
+enrich_enrichment <- enrich$enrichment
+
+# Filter orinigal enrichment dataframe for Genset IDs occuring in the Cluster of interst from the enrichmap 
+enrich$enrichment <- enrich_enrichment[enrich_enrichment$ID %in% filtered_df$name,]
+
+# Plot the Network Plot per Cluster 
+pC1 <- EnrichmentPlot(
+  res = enrich,  group_use = "Adventitial_Fb", db = "Reactome",#group_by = "Celltype_ID_final_coarse",
+  plot_type = "network", 
+  enrlichmap_nlabel = 9, 
+  enrichmap_labelsize = 10,
+  #legend.position = "bottom",
+  topTerm = 300#, enrichmap_label = "feature"
+  )+DarkTheme()+ theme(axis.line = element_line(colour = "black"),
+                      plot.title = ggplot2::element_text(size = 20, face = "bold"),
+                      panel.grid.major = element_blank(),
+                      panel.grid.minor = element_blank(),
+                      panel.border = element_blank(),
+                      panel.background = element_blank(), 
+                      axis.text = element_blank(),   # Remove axis text
+                      axis.ticks = element_blank(),
+                      strip.text = element_text(size = 16, face = "bold", colour = "white"),
+                      strip.background = element_blank(),  # Remove facet background
+                      panel.spacing = unit(1, "lines"),  # Remove space between facets
+                      plot.margin = margin(0, 0, 0, 0) 
+                      )
+pdf(file = "PPFE_mes_Enrichmap_GOA_Reactome_Adv_fb_C1.pdf", width = 11, height = 7)
+pC1
+dev.off()
+
+png("PPFE_mes_Enrichmap_GOA_Reactome_Adv_fb_C1.png", res = 600, units = "in", width = 10, height = 10)
+pC1
+dev.off()
+```
+
+#=============
+# save Enrichment data
+```{r}
+library(writexl)
+write_xlsx(PPFE_mes@tools$Enrichment_Celltype_ID_final_coarse_MAST$enrichment, "PPFE_Mes_MAST_Enrichment.xlsx")
+```
