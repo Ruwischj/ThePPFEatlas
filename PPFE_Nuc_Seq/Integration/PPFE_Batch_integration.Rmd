@@ -14,7 +14,7 @@ knitr::opts_chunk$set(echo = T,
                       cache = F)
 ```
 
-# Packages
+# Libraries
 ```{r}
 library(SCP)
 library(Seurat)
@@ -34,8 +34,7 @@ library(cowplot)
 
 # Read in batch 1
 ```{r}
-# Reads in the cleaned dataset from Batch 1 (Hannover - Germany only)
-PPFE_Batch1 <- readRDS("./PPFE_list_Batch1_Han_03.10.2024.rds") 
+PPFE_Batch1 <- readRDS("./PPFE_list_Batch1_03.10.2024.rds") 
 
 PPFE_Batch1 <- PPFE_Batch1 %>%
   mutate(Batch = "Batch1",
@@ -44,8 +43,7 @@ PPFE_Batch1 <- PPFE_Batch1 %>%
 
 # Read in batch 2 
 ```{r}
-PPFE_Batch2 <- readRDS("/mnt/dzl_bioinf/ruwischj/scRNA_Seq/PPFE_Nuclei_Seq/PPFE_Batch_2_french/PPFE_CTRL_batch2_Han_French_norm_scaled.03.10.2024.rds") # should be the list of cleaned but unintegrated RDS-Objects
-
+PPFE_Batch2 <- readRDS("./PPFE_CTRL_batch2_.03.10.2024.rds") 
 PPFE_Batch2 <- PPFE_Batch2 %>%
   mutate(Batch = "Batch2")
 ```
@@ -106,7 +104,6 @@ anchors <- FindIntegrationAnchors(object.list = PPFE.list, reduction = "rpca", d
 ## RPCA integration
 ```{r}
 ppfe.rpca.integrated_clean <- IntegrateData(anchorset = anchors, dims = 1:50)
-saveRDS(ppfe.rpca.integrated_clean, "PPFE_b1_b2_rpca.int.clean_04102024_unnorm.rds")
 ```
 
 ```{r}
@@ -124,16 +121,6 @@ ppfe.rpca.integrated_clean <- RunCellQC(ppfe.rpca.integrated_clean, assay = "RNA
 DimPlot(ppfe.rpca.integrated_clean, group.by = "CellQC", raster = F)
 ```
 
-## SaveRDS post integration
-```{r}
-saveRDS(ppfe.rpca.integrated_clean, "ppfe.rpca.integrated_feat_cts_cleaned_12_03_2024.rds")
-```
-
-```{r}
-# Data needs to be rescald with "percent.mt to be regressed out... -> the 
-ppfe.rpca.integrated_clean <- readRDS("/mnt/dzl_bioinf/ruwischj/scRNA_Seq/PPFE_Nuclei_Seq/PPFE_Batch_integration/ppfe.rpca.integrated_feat_cts_cleaned_12_03_2024.rds")
-```
-
 ```{r}
 ppfe.rpca.integrated_clean <- ScaleData(ppfe.rpca.integrated_clean, 
                                         vars.to.regress="percent.mt")
@@ -144,7 +131,6 @@ ppfe.rpca.integrated_clean <- RunPCA(ppfe.rpca.integrated_clean,
 ppfe.rpca.integrated_clean <- RunUMAP(ppfe.rpca.integrated_clean, 
                                       dims = 1:50)
 ```
-
 
 ```{r}
 
@@ -165,7 +151,6 @@ ppfe.rpca.integrated_clean <- RunCellQC(
   ppfe.rpca.integrated_clean,
   assay = "RNA",
   qc_metrics = c(
-    #"doublets", 
     "outlier", 
     "umi", 
     "gene", 
@@ -174,8 +159,6 @@ ppfe.rpca.integrated_clean <- RunCellQC(
     "ribo_mito_ratio",
     "species"),
   return_filtered = FALSE,
-  #db_method = "scDblFinder",
-  #db_rate = ncol(srt)/1000 * 0.01,
   outlier_threshold = c("log10_nCount:lower:2.5", "log10_nCount:higher:5",
     "log10_nFeature:lower:2.5", "log10_nFeature:higher:5", "featurecount_dist:lower:2.5"),
   outlier_n = 1,
@@ -237,5 +220,5 @@ FeatureDimPlot(ppfe.rpca.integrated_clean, features = c("EPCAM", "CDKN1A"), rast
 
 # SaveRDS
 ```{r}
-saveRDS(ppfe.rpca.integrated_clean, "Merged_Dataset_B1_B2_ppfe.rpca.integrated_RPCA_cleaned_07_10_2024.rds")
+saveRDS(ppfe.rpca.integrated_clean,"Merged_Dataset_B1_B2_ppfe.rpca.integrated_RPCA_cleaned_07_10_2024.rds")
 ```

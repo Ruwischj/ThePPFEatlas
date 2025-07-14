@@ -14,10 +14,6 @@ knitr::opts_chunk$set(echo = T,
                       cache = F)
 ```
 
-```{r}
-# INfos
-## Dataset was created with 10X Flex Tech >> Lower UMIs, Features and Counts than Xenium ! 
-```
 
 ```{r}
 library(SCP)
